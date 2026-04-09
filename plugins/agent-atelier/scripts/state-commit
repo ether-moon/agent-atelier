@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+"""
+state-commit — Atomic multi-file writer for orchestration state.
+
+All mutation writes to .agent-atelier/** go through this script
+to maintain the single-writer guarantee and cross-file consistency.
+
+Usage:
+  echo '<transaction-json>' | state-commit [--root <path>] [--replay]
+
+Transaction format (stdin):
+{
+  "writes": [
+    {"path": ".agent-atelier/work-items.json", "expected_revision": 5, "content": {...}},
+    {"path": ".agent-atelier/human-gates/_index.md", "content": "# markdown..."}
+  ],
+  "deletes": [".agent-atelier/human-gates/open/HDR-001.json"]
+}
+
+- expected_revision: if set, current file's .revision must match or the tx is rejected.
+  Set to null for new files or non-JSON files.
+- content: dict/list → written as JSON; string → written as-is.
+- deletes: list of relative paths to remove after writes succeed.
+
+Concurrency: an exclusive flock on .state.lock serializes all commits,
+so the validate→write window is race-free even with parallel agents.
+
+--replay: WAL recovery mode. For each write, if the file already contains
+  the target revision (partially applied), skip it. Write only the files
+  that weren't applied yet, then apply pending deletes. This handles the
+  case where a crash happened mid-transaction.
+
+Exit codes: 0=success, 1=usage/invalid transaction, 2=stale revision, 4=runtime error
+"""
+
+import fcntl
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+
+def resolve_root(explicit):
+    if explicit:
+        return os.path.realpath(explicit)
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        return os.path.realpath(out)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return os.path.realpath(os.getcwd())
+
+
+def orchestration_root(root):
+    return os.path.realpath(os.path.join(root, ".agent-atelier"))
+
+
+def resolve_tx_path(root, candidate):
+    if not isinstance(candidate, str) or not candidate:
+        raise ValueError(f"transaction path must be a non-empty string: {candidate!r}")
+
+    allowed_root = orchestration_root(root)
+    resolved = os.path.realpath(os.path.join(root, candidate))
+
+    try:
+        within_root = os.path.commonpath([allowed_root, resolved]) == allowed_root
+    except ValueError:
+        within_root = False
+
+    if not within_root:
+        raise ValueError(
+            f"path escapes .agent-atelier boundary: {candidate}"
+        )
+
+    return resolved
+
+
+def atomic_write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def read_revision(path):
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh).get("revision")
+
+
+def content_revision(content):
+    if isinstance(content, dict):
+        return content.get("revision")
+    return None
+
+
+def serialize(content):
+    if isinstance(content, (dict, list)):
+        return json.dumps(content, indent=2, ensure_ascii=False) + "\n"
+    return str(content)
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(prog="state-commit")
+    parser.add_argument("--root", default=None)
+    parser.add_argument("--replay", action="store_true",
+                        help="WAL recovery: skip already-applied writes")
+    args = parser.parse_args()
+    root = resolve_root(args.root)
+
+    tx = json.load(sys.stdin)
+    writes = tx.get("writes", [])
+    deletes = tx.get("deletes", [])
+    if not writes and not deletes:
+        print("Empty transaction", file=sys.stderr)
+        return 1
+    try:
+        for w in writes:
+            resolve_tx_path(root, w["path"])
+        for d in deletes:
+            resolve_tx_path(root, d)
+    except (KeyError, ValueError) as exc:
+        json.dump({
+            "committed": False,
+            "reason": "invalid_path",
+            "message": str(exc),
+        }, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 1
+
+    # ── Acquire exclusive lock ────────────────────────────────────────
+    # flock serializes concurrent agents so the validate→write window
+    # is atomic. The lock is released when the fd is closed (including
+    # on crash — the OS reclaims it).
+    lock_path = os.path.join(root, ".agent-atelier/.state.lock")
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    lock_fd = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+
+        if args.replay:
+            return _replay(root, writes, deletes)
+        else:
+            return _commit(root, tx, writes, deletes)
+    finally:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+        lock_fd.close()
+
+
+def _commit(root, tx, writes, deletes):
+    """Normal commit: validate revisions → WAL → apply writes → apply deletes → cleanup."""
+
+    # Phase 1: validate all revisions before any write
+    for w in writes:
+        expected = w.get("expected_revision")
+        if expected is None:
+            continue
+        path = resolve_tx_path(root, w["path"])
+        current = read_revision(path)
+        if current != expected:
+            json.dump({
+                "committed": False,
+                "reason": "stale_revision",
+                "path": w["path"],
+                "expected": expected,
+                "actual": current,
+            }, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 2
+
+    # Phase 2: write WAL
+    wal_path = os.path.join(root, ".agent-atelier/.pending-tx.json")
+    atomic_write(wal_path, json.dumps(tx, indent=2, ensure_ascii=False) + "\n")
+
+    # Phase 3: apply writes
+    artifacts = []
+    for w in writes:
+        path = resolve_tx_path(root, w["path"])
+        atomic_write(path, serialize(w["content"]))
+        artifacts.append(w["path"])
+
+    # Phase 4: apply deletes
+    for d in deletes:
+        path = resolve_tx_path(root, d)
+        try:
+            os.unlink(path)
+            artifacts.append(d)
+        except FileNotFoundError:
+            pass
+
+    # Phase 5: remove WAL
+    try:
+        os.unlink(wal_path)
+    except OSError:
+        pass
+
+    json.dump({"committed": True, "artifacts": artifacts}, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return 0
+
+
+def _replay(root, writes, deletes):
+    """WAL replay: complete a partially applied transaction.
+
+    For each write, compare the file's current revision against the
+    target revision in the WAL content:
+      - Matches target → already applied, skip.
+      - Matches expected (or file missing) → not yet applied, write it.
+      - Neither → conflict (another writer intervened), report error.
+    """
+    artifacts = []
+    skipped = []
+
+    for w in writes:
+        path = resolve_tx_path(root, w["path"])
+        target_rev = content_revision(w["content"])
+        current_rev = read_revision(path) if os.path.exists(path) else None
+        expected_rev = w.get("expected_revision")
+
+        if target_rev is not None and current_rev == target_rev:
+            skipped.append(w["path"])
+            continue
+
+        if expected_rev is not None and current_rev != expected_rev and current_rev != target_rev:
+            json.dump({
+                "committed": False,
+                "reason": "replay_conflict",
+                "path": w["path"],
+                "expected": expected_rev,
+                "target": target_rev,
+                "actual": current_rev,
+            }, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 4
+
+        atomic_write(path, serialize(w["content"]))
+        artifacts.append(w["path"])
+
+    for d in deletes:
+        path = resolve_tx_path(root, d)
+        try:
+            os.unlink(path)
+            artifacts.append(d)
+        except FileNotFoundError:
+            skipped.append(d)
+
+    # Remove WAL after successful replay
+    wal_path = os.path.join(root, ".agent-atelier/.pending-tx.json")
+    try:
+        os.unlink(wal_path)
+    except OSError:
+        pass
+
+    json.dump({
+        "committed": True,
+        "replayed": True,
+        "artifacts": artifacts,
+        "skipped": skipped,
+    }, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)

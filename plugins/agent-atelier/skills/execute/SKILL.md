@@ -1,0 +1,221 @@
+---
+name: execute
+description: "Work item execution lifecycle — claim a work item to start implementation, send heartbeats to keep the lease alive, requeue if stuck, mark complete with evidence, or record an attempt. Use when an executor needs to start work, renew a lease, return work to the queue, record a failed attempt, or finalize a work item. Triggers on 'claim', 'heartbeat', 'requeue', 'complete', 'record attempt', 'I'm done with WI-NNN', 'start working on', or 'mark as done'."
+argument-hint: "claim <id> | heartbeat <id> | requeue <id> | complete <id> | attempt <json>"
+---
+
+# Execute — Work Item Execution Lifecycle
+
+## When This Skill Runs
+
+- An executor claims a work item to begin implementation
+- An executor extends its lease (heartbeat)
+- An executor cannot continue and needs to requeue
+- A work item passes validation and is ready to mark done
+- Recording a failed attempt with findings
+
+## Prerequisites
+
+- Orchestration must be initialized
+- For `claim`: work item must be in `ready` status
+- For `heartbeat`: work item must be `implementing` with a valid lease
+- For `complete`: work item must be in `reviewing` or `candidate_validating`
+
+## Allowed Tools
+
+- Read (state files, evidence), Bash (git root, state-commit), Glob
+
+## Write Protocol
+
+All mutations go through the `state-commit` script — the sole writer for `.agent-atelier/**`. Every subcommand below follows the same pattern:
+
+1. **Read** the current store and note its `revision`.
+2. **Validate** preconditions and prepare the updated content.
+3. **Commit** by piping a transaction to `state-commit`:
+   ```bash
+   echo '<transaction-json>' | <plugin-root>/scripts/state-commit --root <repo-root>
+   ```
+4. **Check** the result. If `stale_revision`, re-read and retry.
+
+Revision checking is always enforced — every transaction includes `expected_revision` set to the store's current revision at read time. The `attempt` subcommand writes both an attempt file and work-items.json in a single transaction to maintain consistency.
+
+## Subcommands
+
+### `claim <WI-ID>`
+
+Claims a work item for implementation, establishing a lease.
+
+1. Read `.agent-atelier/work-items.json`.
+2. Find the work item. Verify:
+   - Status is `ready`
+   - No active lease exists (or existing lease has expired)
+3. Update the item:
+   - `status` → `implementing`
+   - `owner_session_id` → the provided session ID (or generate one like `exec-<WI-ID>-<attempt+1>`)
+   - `last_heartbeat_at` → now (UTC)
+   - `lease_expires_at` → now + lease duration (default 90 minutes)
+   - `first_claimed_at` → now (UTC), but only if currently null (preserve the original claim time)
+   - `handoff_count` → increment by 1 (tracks how many times this WI has been claimed)
+   - `revision` → increment by 1
+4. Bump store revision and commit via state-commit with `expected_revision` set to the store revision observed in step 1.
+
+**Arguments:**
+- `<WI-ID>` — required
+- `--owner-session-id <id>` — required (executor's session identity)
+- `--lease-minutes <N>` — optional, default 90
+
+### `heartbeat <WI-ID>`
+
+Extends the lease on a work item the executor is actively working on. Heartbeats prove the executor is alive. Without them, the watchdog will eventually reclaim the item.
+
+1. Read the store.
+2. Find the work item. Verify:
+   - Status is `implementing`
+   - `owner_session_id` matches the caller
+   - Lease has not already expired
+3. Update:
+   - `last_heartbeat_at` → now
+   - `lease_expires_at` → now + lease duration
+   - `revision` → increment by 1
+4. Bump store revision and commit via state-commit.
+
+### `requeue <WI-ID>`
+
+Returns a work item to the queue when the executor cannot continue. This might happen because the executor hit a dead end, needs different information, or the session is ending.
+
+1. Read the store.
+2. Find the work item. Verify:
+   - Status is any non-terminal status including `reviewing` (completed items with status `done` cannot be requeued)
+   - If `--owner-session-id` is provided, it matches the current owner (or owner is null)
+3. Update:
+   - `status` → `ready` (default) or `pending` if specified
+   - Clear lease fields: `owner_session_id` → null, `last_heartbeat_at` → null, `lease_expires_at` → null
+   - If requeuing from `reviewing`: additionally clear promotion metadata (`promotion.candidate_branch` → null, `promotion.candidate_commit` → null, `promotion.status` → null)
+   - If `--increment-stale-requeue`: increment `stale_requeue_count`
+   - If `--reason`: set `last_requeue_reason`
+   - `revision` → increment by 1
+4. Bump store revision and write.
+
+**Common Use Cases:**
+- **Implementation requeue** — Builder hit a dead end during `implementing`. Standard requeue to `ready`.
+- **AUTOFIX requeue** — Review found bugs, WI is in `reviewing`. The Orchestrator requeues with `--reason autofix` so a Builder can claim it for the fix cycle. Promotion metadata is cleared because the current candidate is invalid.
+
+### `complete <WI-ID>`
+
+Marks a work item as done. This is a high-bar operation — it requires evidence that the work actually passed validation.
+
+1. Read the store.
+2. Find the work item. Verify status is `reviewing` or `candidate_validating`.
+3. **Verify evidence:**
+   - Read the validation manifest file at the provided path
+   - Manifest `status` must be `passed`
+   - If manifest has a `work_item_id`, it must match `<WI-ID>`
+   - All `--evidence-ref` paths must exist on disk
+   - At least one `--verify-check` must be provided
+4. Build the completion record:
+   ```json
+   {
+     "completed_at": "<now>",
+     "validation_run_id": "<from manifest>",
+     "validation_manifest": "<relative path>",
+     "evidence_refs": ["<relative paths>"],
+     "verify_checks": ["<check names>"]
+   }
+   ```
+5. Update:
+   - `status` → `done`
+   - Clear lease fields
+   - `completion` → the completion record above
+   - `revision` → increment by 1
+6. Bump store revision and write.
+
+**Arguments:**
+- `--validation-manifest <path>` — required
+- `--evidence-ref <path>` — required, can repeat
+- `--verify-check <name>` — required, can repeat
+
+### `attempt <json>`
+
+Records an implementation attempt — useful for tracking what was tried, what failed, and why. The attempt is stored as a separate file, and the work item is updated to reference it.
+
+1. Parse the attempt payload. Required field: `work_item_id`.
+2. Read the store. Find the work item.
+3. Calculate the next attempt number: `attempt_count + 1`.
+4. Set defaults:
+   - `id` → `ATT-<WI-ID>-<NN>`
+   - `attempt` → the calculated number
+5. Update the work item:
+   - `attempt_count` → new count
+   - `last_attempt_ref` → relative path to the attempt file
+   - `last_finding_fingerprint` → from payload if provided
+   - `revision` → increment by 1
+6. Bump store revision.
+7. Commit both the attempt file AND the updated work-items.json in a single state-commit transaction. This ensures the attempt record and the work item reference are always consistent.
+
+## Timestamps
+
+All timestamps are UTC ISO-8601 with `Z` suffix: `2026-04-08T12:00:00Z`
+
+To calculate lease expiry: current time + lease minutes. Truncate microseconds.
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | Usage or validation error (missing required fields, invalid payload) |
+| `2` | Precondition failed (wrong status, lease owner mismatch) or stale revision |
+| `3` | Work item not found |
+| `4` | Runtime or environment failure |
+
+## Input Conventions
+
+All subcommands accept payload via:
+- `--json '<inline-json>'` — inline JSON string
+- `--input <path>` — path to a JSON file
+
+Required flags for all mutating operations:
+- `--request-id <id>` — unique request identifier for idempotency tracking
+- `--based-on-revision <N>` — the store revision observed at read time
+
+## Output Contract
+
+All subcommands return JSON to stdout:
+
+```json
+{
+  "request_id": "REQ-104",
+  "accepted": true,
+  "committed_revision": 13,
+  "changed": true,
+  "artifacts": [
+    ".agent-atelier/work-items.json"
+  ]
+}
+```
+
+The `attempt` subcommand additionally includes the attempt file in `artifacts`. Diagnostic messages go to stderr.
+
+## Idempotency
+
+- Same `request_id` + same payload → return previous result with `"changed": false, "replayed": true`
+- Same `request_id` + different payload → reject with exit code `1`
+- Stale `based_on_revision` → reject with exit code `2`
+
+## Error Handling
+
+| Condition | Exit Code | Action |
+|-----------|-----------|--------|
+| WI not in expected status | `2` | Report current status, suggest correct action |
+| Lease owner mismatch | `2` | Report who holds the lease and when it expires |
+| Lease already expired | `2` | Suggest requeue first, then re-claim |
+| Validation manifest not passed | `2` | Report manifest status, block completion |
+| Evidence file missing | `1` | List which files weren't found |
+| WI not found | `3` | Report missing WI, list available IDs |
+| Stale revision | `2` | Report current vs expected, ask caller to re-read |
+
+## Constraints
+
+- Lease fields only exist on `implementing` items — always clear them on status transitions away from `implementing`.
+- The `complete` subcommand exists to ensure no work item becomes `done` without real evidence. Do not bypass the evidence checks.
+- Read `references/wi-schema.md` for normalization rules that apply to all work item writes.

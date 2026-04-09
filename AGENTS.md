@@ -4,10 +4,19 @@ agent-atelier — Autonomous product development loop — AI agent team that cyc
 
 ## Plugin Structure
 
-- `plugins/agent-atelier/skills/` — Skill definitions (SKILL.md files)
-- `plugins/agent-atelier/hooks/` — Lifecycle hooks (hooks.json + shell scripts)
-- `plugins/agent-atelier/scripts/` — Bundled CLI tools
-- `plugins/agent-atelier/schema/` — Asset files (SQL, config templates, etc.)
+- `plugins/agent-atelier/skills/` — 9 skills: init, status, wi, execute, candidate, validate, gate, watchdog, run
+- `plugins/agent-atelier/hooks/` — Lifecycle hooks: UserPromptSubmit, PreToolUse (destructive command blocking), Stop (dangling obligation check)
+- `plugins/agent-atelier/scripts/` — `state-commit` (atomic multi-file writer), `build-vrm-prompt` (VRM evidence input builder)
+- `plugins/agent-atelier/schema/` — `vrm-evidence-input.schema.json`
+- `plugins/agent-atelier/references/` — paths, state-defaults, wi-schema, recovery-protocol, success-metrics-routing
+- `plugins/agent-atelier/references/prompts/` — 10 production role prompts (orchestrator, state-manager, pm, architect, builder, vrm, qa-reviewer, ux-reviewer, ui-designer, aesthetic-ux-reviewer)
+
+## Orchestration State
+
+Runtime state lives in `.agent-atelier/` (gitignored). All writes go through `state-commit` script (sole writer guarantee). Key files:
+- `.agent-atelier/loop-state.json` — control plane (mode, active candidate, open gates)
+- `.agent-atelier/work-items.json` — WI store (status, lease, promotion, completion)
+- `.agent-atelier/watchdog-jobs.json` — timeout thresholds and operating budgets
 
 ## Skill Format
 
@@ -21,7 +30,7 @@ argument-hint: "[optional args]"
 ---
 ```
 
-Followed by markdown sections: When This Skill Runs, Prerequisites, Allowed Tools, Input, Output, Execution Steps, Error Handling, Constraints.
+Followed by markdown sections: When This Skill Runs, Prerequisites, Allowed Tools, Write Protocol, Subcommands, Exit Codes, Input Conventions, Output Contract, Idempotency, Error Handling, Constraints.
 
 ## Testing
 

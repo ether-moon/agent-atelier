@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(*/knowledge-gate:*)",
-      "Bash(sqlite3 .knowledge/vault.db:*)"
+      "Bash(sqlite3 .knowledge/vault.db:*)",
+      "Bash(*/on-prompt.sh)",
+      "Bash(*/on-pre-tool-use.sh)",
+      "Bash(*/on-task-completed.sh)",
+      "Bash(*/on-stop.sh)",
+      "Bash(*/state-commit:*)",
+      "Bash(*/build-vrm-prompt:*)"
     ]
   },
   "enabledPlugins": {
