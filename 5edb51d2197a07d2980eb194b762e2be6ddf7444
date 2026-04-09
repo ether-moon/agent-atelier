@@ -1,0 +1,20 @@
+## Decisions Made
+- Replaced scaffold 0.1.0 changelog with real implementation content: the initial entry was a placeholder from plugin template setup
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Updated CHANGELOG.md to reflect the actual 0.1.0 release content. The previous entry was a scaffold placeholder ("Initial plugin scaffold with hello skill, example hook, and CLI script") that did not describe the implemented plugin.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
