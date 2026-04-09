@@ -1,0 +1,30 @@
+## Decisions Made
+- validate failed path delegates loop-state cleanup to candidate clear instead of writing both stores: prevents cross-skill state coupling and keeps validate focused on WI-level concerns
+- candidate clear demoted path made idempotent (skip WI write if already demoted by validate): chosen over alternative of having validate not write WI changes at all, because validate is the natural owner of WI status transitions
+- Mode Transition Protocol uses an explicit 12-row table with invalid-transition rejection: formal protocol over implicit convention to prevent state machine drift
+- Review findings persisted to disk (.agent-atelier/reviews/<WI-ID>/findings.json): enables cold resume without re-running review synthesis
+- execute requeue accepts any non-terminal status including reviewing with promotion metadata cleanup: enables AUTOFIX cycle from review phase
+- on-prompt.sh collects 3 signals (open gates, active_candidate, pending WAL) via python3 inline: chosen over shell-only approach for JSON parsing reliability
+
+## Problems Encountered
+- validate/candidate double-write discovered during production readiness review: validate and candidate clear both wrote the same WI demotion changes. Resolved by making candidate clear idempotent.
+- REVIEW_SYNTHESIS phase text in run SKILL.md was missing the clean-review-to-IMPLEMENT transition that existed in the transition table. Resolved by adding the missing transition to phase text.
+- on-prompt.sh missing trailing newline after JSON output. Resolved by adding print() after json.dump.
+- AGENTS.md listed 8 role prompts but 10 existed on disk (ui-designer, aesthetic-ux-reviewer were missing from the count). Resolved by updating count and list.
+
+## Constraints Identified
+- Single active_candidate slot is exclusive — only one candidate under validation at a time. This serialization is an invariant from the state schema.
+- Information barrier between implementation and validation must be enforced at every phase boundary — VRM never sees Builder context.
+- All state writes must go through state-commit (sole writer guarantee) — no direct file writes to .agent-atelier/.
+
+## Open Questions
+- None
+
+## Context
+Implemented the full agent-atelier orchestration plugin from design docs. Applied a 6-file critical fix plan (CRITICAL-1 through CRITICAL-4, HIGH-1, AGENTS.md mismatch), then discovered and resolved a validate/candidate contract inconsistency during production readiness review. Updated system-design.md and agent-lifecycle.md to reflect all changes. Rewrote README.md from template state. All 47 tests pass.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
