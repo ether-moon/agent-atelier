@@ -1,0 +1,22 @@
+## Decisions Made
+- Pin knowledge-distillery checkout to immutable commit SHA instead of moving main ref: prevents supply-chain attack vector where contents:write grants arbitrary code execution to whatever is on main
+- Make _replay() read WAL file as source-of-truth instead of stdin: stdin payload could diverge from the WAL, losing pending recovery state during crash recovery
+- Dismiss CodeRabbit finding on tests/all.sh plugin.json find predicate: verified the file is at plugins/agent-atelier/.claude-plugin/plugin.json, so the -path "*/.claude-plugin/*" filter is correct
+
+## Problems Encountered
+- CodeRabbit review comment #3 (tests/all.sh find predicate) was incorrect: the reviewer assumed plugin.json lives outside .claude-plugin, but the actual project structure places it at plugins/agent-atelier/.claude-plugin/plugin.json, making the existing filter correct
+
+## Constraints Identified
+- The pre-commit hook blocks direct git commit and requires the memento-commit skill workflow
+
+## Open Questions
+- None
+
+## Context
+Scanned PR #1 (copy-plugin-template -> main) for blockers. No merge conflicts or CI failures found. Three critical CodeRabbit review comments identified: supply-chain pinning in apply-changeset.yml, WAL replay trust in state-commit, and plugin.json find predicate in tests/all.sh. Two were valid and fixed; one was dismissed after verification. Full test suite (49 tests) passes after fixes.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
