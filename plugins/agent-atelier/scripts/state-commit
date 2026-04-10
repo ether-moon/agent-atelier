@@ -121,25 +121,40 @@ def main():
     args = parser.parse_args()
     root = resolve_root(args.root)
 
-    tx = json.load(sys.stdin)
-    writes = tx.get("writes", [])
-    deletes = tx.get("deletes", [])
-    if not writes and not deletes:
-        print("Empty transaction", file=sys.stderr)
-        return 1
-    try:
-        for w in writes:
-            resolve_tx_path(root, w["path"])
-        for d in deletes:
-            resolve_tx_path(root, d)
-    except (KeyError, ValueError) as exc:
-        json.dump({
-            "committed": False,
-            "reason": "invalid_path",
-            "message": str(exc),
-        }, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 1
+    tx = None
+    writes = []
+    deletes = []
+
+    if not args.replay:
+        try:
+            tx = json.load(sys.stdin)
+        except json.JSONDecodeError as exc:
+            json.dump({
+                "committed": False,
+                "reason": "invalid_transaction",
+                "message": str(exc),
+            }, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 1
+
+        writes = tx.get("writes", [])
+        deletes = tx.get("deletes", [])
+        if not writes and not deletes:
+            print("Empty transaction", file=sys.stderr)
+            return 1
+        try:
+            for w in writes:
+                resolve_tx_path(root, w["path"])
+            for d in deletes:
+                resolve_tx_path(root, d)
+        except (KeyError, ValueError) as exc:
+            json.dump({
+                "committed": False,
+                "reason": "invalid_path",
+                "message": str(exc),
+            }, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 1
 
     # ── Acquire exclusive lock ────────────────────────────────────────
     # flock serializes concurrent agents so the validate→write window
@@ -231,10 +246,21 @@ def _replay(root):
         sys.stdout.write("\n")
         return 4
 
-    with open(wal_path, encoding="utf-8") as fh:
-        tx = json.load(fh)
-    writes = tx.get("writes", [])
-    deletes = tx.get("deletes", [])
+    try:
+        with open(wal_path, encoding="utf-8") as fh:
+            tx = json.load(fh)
+        writes = tx.get("writes", [])
+        deletes = tx.get("deletes", [])
+        if not isinstance(writes, list) or not isinstance(deletes, list):
+            raise ValueError("WAL transaction must contain list fields: writes, deletes")
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        json.dump({
+            "committed": False,
+            "reason": "wal_invalid",
+            "message": str(exc),
+        }, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 4
 
     artifacts = []
     skipped = []
