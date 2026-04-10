@@ -1,0 +1,24 @@
+## Decisions Made
+- Guard stdin parsing with if-not-replay: replay path must be fully WAL-driven and stdin-independent, so callers do not need to pipe dummy JSON when recovering from a crash
+- Reorder commit-before-rebase in workflow cleanup: git pull --rebase fails with a dirty index, so staged git rm deletions must be committed first
+- Add structured error for malformed WAL: corrupted WAL should return exit code 4 with machine-readable JSON rather than an unhandled traceback
+
+## Problems Encountered
+- state-commit --replay was gated by unconditional stdin parsing at line 124, causing failure when no stdin was piped: resolved by wrapping the entire stdin block in an if-not-replay guard
+- apply-changeset cleanup step would fail on git pull --rebase with dirty index from prior git rm: resolved by swapping commit and rebase order
+
+## Constraints Identified
+- WAL replay must never depend on stdin: the WAL file on disk is the sole source of truth for crash recovery, ensuring pending state is never lost
+- Structured error output is required for all failure paths: callers parse JSON from stdout to determine failure reason and cannot rely on tracebacks
+
+## Open Questions
+- None
+
+## Context
+Scanned PR ether-moon/agent-atelier#1 for blockers. No merge conflicts or CI failures were found. Three unresolved CodeRabbit review comments from round 2 were identified and verified against the actual code: a git operation ordering bug in apply-changeset.yml, stdin-replay coupling in state-commit, and missing error handling for malformed WAL content. All three fixes were applied and the full test suite (49/49) passes.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
