@@ -1,0 +1,30 @@
+## Decisions Made
+- Peer review 피드백을 OBVIOUS(자동 수정) vs AMBIGUOUS(에스컬레이션)로 분류하여 처리: 명확한 버그/보안 이슈는 즉시 수정, 설계 트레이드오프가 있는 항목은 사용자 결정 후 적용
+- resume_target을 모드 힌트로 고정: gate resolve 시 WI 상태는 항상 ready로, 모드 전이는 Orchestrator 책임
+- 워치독 자동 후보 승격을 유지하되 안전 원칙에 "큐 순서 기반 승격은 기계적 복구"로 명시: 별도 Orchestrator 에스컬레이션보다 단순
+- build-vrm-prompt에서 verify 없는 WI는 즉시 실패(exit 2): 무의미한 echo 폴백 제거, 잘못된 증거 생산 방지
+- 파괴적 명령어 차단 목록은 defense-in-depth로 유지: 패턴 추가는 whack-a-mole이므로 현행 유지 + 주석
+- 크래시 복구는 콜드 리줌에 불일치 감지 추가로 해결: 원자적 트랜잭션화보다 가볍고 충분
+- 18건의 AMBIGUOUS 항목을 v0.1.0에 불필요하거나 추가 설계 논의 필요로 건너뜀
+
+## Problems Encountered
+- Gemini CLI가 피어 리뷰 실행 중 타임아웃/실패: Codex + Claude 결과만으로 진행
+- on-prompt.sh에 보안 취약점과 필드명 버그가 동시에 존재: 한 번에 두 문제를 함께 수정
+- hooks.json에 TaskCompleted 훅을 연결했으나 tests/all.sh의 EXPECTED_HOOK_TYPES에 반영 누락: 코드-문서 일관성 검증 단계에서 발견하여 추가 수정
+
+## Constraints Identified
+- PreToolUse 훅의 명령어 차단은 완전한 보안 경계가 될 수 없음: bash -c, eval, env 등으로 우회 가능하므로 defense-in-depth로만 취급
+- 피어 리뷰에서 발견된 설계 이슈(스키마 버전, 리스 검증, 동시 모드 표현 등)는 v0.1.0 범위를 넘어서 향후 논의 필요
+
+## Open Questions
+- actions/checkout@v4로 고정했으나 v6가 2026년 현재 존재할 수 있음 — 확인 필요
+- 건너뛴 18건의 AMBIGUOUS 항목 중 일부(A10 스키마 버전, A15 리스 검증)는 다중 에이전트 운영 시 필요해질 수 있음
+
+## Context
+Codex와 Claude를 피어 리뷰어로 활용하여 copy-plugin-template 브랜치의 agent-atelier 플러그인을 검토했다. 30건 이상의 이슈 중 20건을 수정(보안 4건, 정확성 6건, 완전성 10건)하고 18건은 v0.1.0에 불필요하거나 설계 논의가 필요한 항목으로 건너뛰었다. 수정 대상 16개 파일에 걸쳐 코드와 문서의 일관성을 확인했다.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
