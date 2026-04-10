@@ -113,6 +113,9 @@ def main():
 
     # Build verification commands from the verify field
     verify_commands = wi.get("verify", [])
+    if not verify_commands:
+        print(f"Error: work item '{args.wi_id}' has no verify commands — cannot build VRM input", file=sys.stderr)
+        return 2
 
     output = {
         "work_item_id": args.wi_id,
@@ -121,7 +124,7 @@ def main():
         "target_commit": commit,
         "acceptance_criteria_refs": criteria_refs if criteria_refs else [f"docs/product/behavior-spec.md"],
         "files_expected": wi.get("owned_paths", []),
-        "verification_commands": verify_commands if verify_commands else ["echo 'no verify commands defined'"],
+        "verification_commands": verify_commands,
         "relevant_constraints": wi.get("relevant_constraints", []),
         "non_goals": wi.get("non_goals", []),
         "forbidden_context": [

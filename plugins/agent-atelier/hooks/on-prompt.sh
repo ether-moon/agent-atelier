@@ -23,16 +23,16 @@ if [ -z "$ROOT" ]; then
 fi
 
 # ── Collect signals and emit context if any are active ───────────────
-python3 -c "
+python3 - "$ROOT" <<'PY' 2>/dev/null || true
 import json, os, sys
 
-state_dir = os.path.join('$ROOT', '.agent-atelier')
+state_dir = os.path.join(sys.argv[1], '.agent-atelier')
 signals = []
 
 # Signal 1: open gates
 try:
     ls = json.load(open(os.path.join(state_dir, 'loop-state.json')))
-    gates = [g for g in ls.get('gates', []) if g.get('status') == 'open']
+    gates = ls.get('open_gates', [])
     if gates:
         signals.append(f'{len(gates)} open gate(s)')
     # Signal 2: active candidate
@@ -51,6 +51,6 @@ if signals:
     msg = 'agent-atelier active: ' + '; '.join(signals)
     json.dump({'additionalContext': msg}, sys.stdout)
     print()
-" 2>/dev/null || true
+PY
 
 exit 0

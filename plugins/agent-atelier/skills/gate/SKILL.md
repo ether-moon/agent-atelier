@@ -93,7 +93,7 @@ Creates a new human decision request. The orchestrator provides the decision con
    - Updated work-items.json with blocked WIs:
      - `status` → `blocked_on_human_gate`
      - `blocked_by_gate` → the HDR ID
-     - `resume_target` → the status to return to after resolution
+     - `resume_target` → the mode to resume after resolution (e.g., `IMPLEMENT`, `BUILD_PLAN`)
      - Bump item and store revisions
    - Updated loop-state.json with HDR ID added to `open_gates`, revision bumped
    - Updated `_index.md` with new row in "Open Gates" table
@@ -117,7 +117,7 @@ Resolves an open gate with the user's decision.
 
 2. **Prepare all changes in memory:**
    - Resolved HDR: set `state` → `resolved`, fill `resolution` fields
-   - Updated work-items.json: unblock each WI (`status` → `resume_target` or `ready`, clear `blocked_by_gate`)
+   - Updated work-items.json: unblock each WI (`status` → `ready`, clear `blocked_by_gate`). The `resume_target` field is a mode hint for the Orchestrator, not a WI status.
    - Updated loop-state.json: remove HDR ID from `open_gates`
    - Updated `_index.md`: move row from "Open Gates" to "Resolved Gates"
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # PreToolUse hook — blocks destructive commands.
 # Exit 0 = allow, Exit 2 = block with feedback message on stdout.
-# Loose v1: block only clearly destructive/irreversible ops.
+# Defense-in-depth only — not a security boundary. Indirect execution
+# (bash -c, eval, env, etc.) and flag reordering can bypass these patterns.
 
 set -euo pipefail
 

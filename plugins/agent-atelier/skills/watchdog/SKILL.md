@@ -30,7 +30,7 @@ The watchdog performs ONLY mechanical, reversible recovery. It never:
 - Merges branches
 - Resolves human gates
 - Invents validation results
-- Makes product decisions
+- Makes product decisions (promoting the next candidate from `candidate_queue` is mechanical — the queue order was already decided by the Orchestrator)
 
 If something requires judgment, the watchdog escalates to the orchestrator.
 
@@ -74,6 +74,16 @@ For each work item with status `implementing`:
    - Increment `stale_requeue_count`
    - Set `last_requeue_reason` → `"watchdog: lease expired"`
    - Bump the item's `revision`
+   - Record the recovery action
+
+### 2b. Check for Stale Reviews
+
+For each work item with status `reviewing`:
+1. Parse `last_heartbeat_at` or the timestamp when status changed to `reviewing`.
+2. If elapsed time exceeds `review_timeout_minutes` (default 30):
+   - Set `status` → `ready`
+   - Set `last_requeue_reason` → `"watchdog: review timeout"`
+   - Increment `stale_requeue_count`
    - Record the recovery action
 
 ### 3. Check for Stale Candidates

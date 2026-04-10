@@ -12,7 +12,7 @@ echo "=== Plugin Structure Tests ==="
 
 # ── marketplace.json ─────────────────────────────────────────────────
 if [ -f "$ROOT/.claude-plugin/marketplace.json" ]; then
-  if python3 -c "import json; json.load(open('$ROOT/.claude-plugin/marketplace.json'))" 2>/dev/null; then
+  if python3 -c "import json, sys; json.load(open(sys.argv[1]))" "$ROOT/.claude-plugin/marketplace.json" 2>/dev/null; then
     pass "marketplace.json is valid JSON"
   else
     fail "marketplace.json is invalid JSON"
@@ -24,7 +24,7 @@ fi
 # ── plugin.json ──────────────────────────────────────────────────────
 PLUGIN_DIR=$(find "$ROOT/plugins" -name "plugin.json" -path "*/.claude-plugin/*" 2>/dev/null | head -1)
 if [ -n "$PLUGIN_DIR" ]; then
-  if python3 -c "import json; d=json.load(open('$PLUGIN_DIR')); assert 'name' in d; assert 'version' in d" 2>/dev/null; then
+  if python3 -c "import json, sys; d=json.load(open(sys.argv[1])); assert 'name' in d; assert 'version' in d" "$PLUGIN_DIR" 2>/dev/null; then
     pass "plugin.json has name and version"
   else
     fail "plugin.json missing required fields"
@@ -36,7 +36,7 @@ fi
 # ── hooks.json ───────────────────────────────────────────────────────
 HOOKS_FILE=$(find "$ROOT/plugins" -name "hooks.json" 2>/dev/null | head -1)
 if [ -n "$HOOKS_FILE" ]; then
-  if python3 -c "import json; json.load(open('$HOOKS_FILE'))" 2>/dev/null; then
+  if python3 -c "import json, sys; json.load(open(sys.argv[1]))" "$HOOKS_FILE" 2>/dev/null; then
     pass "hooks.json is valid JSON"
   else
     fail "hooks.json is invalid JSON"
@@ -46,9 +46,9 @@ else
 fi
 
 # ── Hook type wiring ─────────────────────────────────────────────────
-EXPECTED_HOOK_TYPES="UserPromptSubmit PreToolUse Stop SubagentStop"
+EXPECTED_HOOK_TYPES="UserPromptSubmit PreToolUse Stop SubagentStop TaskCompleted"
 for htype in $EXPECTED_HOOK_TYPES; do
-  if python3 -c "import json; d=json.load(open('$HOOKS_FILE')); assert '$htype' in d['hooks']" 2>/dev/null; then
+  if python3 -c "import json, sys; d=json.load(open(sys.argv[1])); assert sys.argv[2] in d['hooks']" "$HOOKS_FILE" "$htype" 2>/dev/null; then
     pass "hook type '$htype' wired in hooks.json"
   else
     fail "hook type '$htype' missing from hooks.json"
@@ -56,9 +56,8 @@ for htype in $EXPECTED_HOOK_TYPES; do
 done
 
 # ── Hook script executability ────────────────────────────────────────
-HOOK_SCRIPTS=$(python3 -c "
-import json, os
-d = json.load(open('$HOOKS_FILE'))
+HOOK_SCRIPTS=$(python3 -c "import json, os, sys
+d = json.load(open(sys.argv[1]))
 seen = set()
 for entries in d['hooks'].values():
     for entry in entries:
@@ -68,7 +67,7 @@ for entries in d['hooks'].values():
             if name and name not in seen:
                 seen.add(name)
                 print(name)
-" 2>/dev/null)
+" "$HOOKS_FILE" 2>/dev/null)
 HOOKS_DIR="$(dirname "$HOOKS_FILE")"
 if [ -n "$HOOK_SCRIPTS" ]; then
   while IFS= read -r script_name; do
@@ -164,7 +163,7 @@ fi
 # ── state-commit script ──────────────────────────────────────────────
 COMMIT_SCRIPT=$(find "$ROOT/plugins" -name "state-commit" -path "*/scripts/*" -type f 2>/dev/null | head -1)
 if [ -n "$COMMIT_SCRIPT" ] && [ -x "$COMMIT_SCRIPT" ]; then
-  if "$COMMIT_SCRIPT" --help >/dev/null 2>&1 || true; then
+  if "$COMMIT_SCRIPT" --help >/dev/null 2>&1; then
     pass "state-commit script is executable"
   fi
 else
@@ -173,7 +172,7 @@ fi
 
 # ── Mutation flow tests ──────────────────────────────────────────────
 if [ -x "$ROOT/tests/mutation_flow.sh" ]; then
-  if "$ROOT/tests/mutation_flow.sh" >/dev/null 2>&1; then
+  if "$ROOT/tests/mutation_flow.sh"; then
     pass "Mutation flow tests pass"
   else
     fail "Mutation flow tests failed"

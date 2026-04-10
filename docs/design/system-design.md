@@ -760,7 +760,7 @@ Work items must carry both **execution instructions** and **intent-preservation 
   "promotion": {
     "candidate_branch": "candidate/WI-014",
     "candidate_commit": "abc1234",
-    "status": "awaiting_vrm"
+    "status": "validating"
   }
 }
 ```

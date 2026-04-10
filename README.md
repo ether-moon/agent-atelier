@@ -56,7 +56,7 @@ Add to your project's `.claude/settings.json`:
 }
 ```
 
-Requires Claude Code with Opus 4.6 (Agent Teams support).
+Requires Claude Code with Opus 4.6 (Agent Teams support) and Python 3.
 
 ## Usage
 

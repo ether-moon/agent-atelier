@@ -48,7 +48,7 @@ Then spawn each core teammate with their prompt:
 | Role | Prompt Source | Mode |
 |------|-------------|------|
 | State Manager | `references/prompts/state-manager.md` | `acceptEdits` |
-| PM | `references/prompts/pm.md` | `plan` (read-only + plan) |
+| PM | `references/prompts/pm.md` | `acceptEdits` |
 | Architect | `references/prompts/architect.md` | `acceptEdits` |
 
 The **Orchestrator** role is played by the lead agent (you) — do not spawn a separate teammate for it. Read `references/prompts/orchestrator.md` as your own operating guide.
@@ -88,6 +88,8 @@ All mode transitions are explicit — the Orchestrator directs the State Manager
 | REVIEW_SYNTHESIS | SPEC_DRAFT | Spec gaps found |
 | REVIEW_SYNTHESIS | IMPLEMENT | Review clean — continue next WI |
 | AUTOFIX | VALIDATE | New candidate produced |
+| AUTOFIX | IMPLEMENT | Builder needs to re-implement (not just patch) |
+| SPEC_HARDEN | SPEC_DRAFT | Spec fundamentally inadequate — needs rewrite |
 | Any | DONE | All WIs `done` with evidence |
 
 **Overlap:** IMPLEMENT and VALIDATE may be active concurrently — a Builder can work on the next WI while VRM validates the current candidate.

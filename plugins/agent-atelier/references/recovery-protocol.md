@@ -45,6 +45,10 @@ For each WI, determine its recoverable state:
 | `done` | N/A | No action needed |
 | `pending` / `ready` | N/A | Available for claiming |
 
+### Step 3b: Candidate–WI Consistency Check
+
+If `active_candidate` is non-null, verify the referenced WI is actually in `candidate_validating` status. If the WI has already been reset to `ready` (e.g., crash between `validate record` and `candidate clear`), run `candidate clear --reason crash-recovery` to reconcile loop-state.
+
 ### Step 4: Restore Gate Awareness
 
 Scan `human-gates/open/` for pending HDRs. Cross-reference with `loop-state.json.open_gates` and `work-items.json` `blocked_by_gate` fields. Report any inconsistencies.
@@ -69,6 +73,15 @@ They do NOT receive:
 - Previous session's conversation history
 - Builder summaries or narratives from crashed sessions
 - Memory of "what we were doing"
+
+## Corrupted State Files
+
+If a state file contains invalid JSON (disk corruption, manual edit, encoding error), `state-commit` will fail with exit code 4 and block all further writes. Manual recovery:
+
+1. Identify the corrupted file from the error message.
+2. Check `git log` for the last known-good version and restore it: `git checkout HEAD -- .agent-atelier/<file>`.
+3. If no git history exists (file was never committed), delete it and re-run `/agent-atelier:init` to regenerate defaults.
+4. If `.pending-tx.json` is itself corrupted, delete it — the incomplete transaction is lost but state files remain at their last consistent revision.
 
 ## Mandatory Test Scenarios
 

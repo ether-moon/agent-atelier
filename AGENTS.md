@@ -5,7 +5,7 @@ agent-atelier — Autonomous product development loop — AI agent team that cyc
 ## Plugin Structure
 
 - `plugins/agent-atelier/skills/` — 9 skills: init, status, wi, execute, candidate, validate, gate, watchdog, run
-- `plugins/agent-atelier/hooks/` — Lifecycle hooks: UserPromptSubmit, PreToolUse (destructive command blocking), Stop (dangling obligation check)
+- `plugins/agent-atelier/hooks/` — Lifecycle hooks: UserPromptSubmit, PreToolUse (destructive command blocking), Stop, SubagentStop (dangling obligation check), TaskCompleted (artifact verification)
 - `plugins/agent-atelier/scripts/` — `state-commit` (atomic multi-file writer), `build-vrm-prompt` (VRM evidence input builder)
 - `plugins/agent-atelier/schema/` — `vrm-evidence-input.schema.json`
 - `plugins/agent-atelier/references/` — paths, state-defaults, wi-schema, recovery-protocol, success-metrics-routing
