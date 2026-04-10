@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VRM Evidence Input",
+  "description": "Input payload for the Validation Runtime Manager. Assembled by build-vrm-prompt from work item and spec data only — builder narratives, diffs, and implementation explanations are excluded.",
+  "type": "object",
+  "required": [
+    "work_item_id",
+    "behavior_spec_revision",
+    "target_branch",
+    "target_commit",
+    "acceptance_criteria_refs",
+    "verification_commands",
+    "forbidden_context"
+  ],
+  "properties": {
+    "work_item_id": {
+      "type": "string",
+      "pattern": "^WI-\\d+$",
+      "description": "The work item being validated"
+    },
+    "behavior_spec_revision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Behavior spec revision the WI was built against"
+    },
+    "target_branch": {
+      "type": "string",
+      "description": "Candidate branch to validate"
+    },
+    "target_commit": {
+      "type": "string",
+      "description": "Specific commit SHA to validate"
+    },
+    "acceptance_criteria_refs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Paths or anchors into the behavior spec (e.g., docs/product/behavior-spec.md#B3)"
+    },
+    "files_expected": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths the WI is expected to have modified (from owned_paths)"
+    },
+    "verification_commands": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Commands the VRM must execute to validate the candidate"
+    },
+    "relevant_constraints": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Must-stay-true constraints from the WI"
+    },
+    "non_goals": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Explicitly out of scope — VRM should not flag these as missing"
+    },
+    "forbidden_context": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "builder_summary",
+          "builder_diff",
+          "builder_log",
+          "architect_interpretation"
+        ]
+      },
+      "description": "Context types that must NOT be included in VRM input (information barrier)"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""
+build-vrm-prompt — Assembles VRM evidence input from work item and spec data.
+
+Enforces the validation information barrier: the output contains ONLY data
+derived from the work item, behavior spec, and verification commands. Builder
+summaries, diffs, logs, and implementation explanations are excluded.
+
+Usage:
+  build-vrm-prompt --wi-id WI-014 [--root <path>]
+
+Reads:
+  - .agent-atelier/work-items.json (the target work item)
+  - .agent-atelier/loop-state.json (active_candidate for branch/commit)
+
+Outputs:
+  JSON matching plugins/agent-atelier/schema/vrm-evidence-input.schema.json
+
+Exit codes: 0=success, 1=usage/validation, 2=precondition failed, 3=not found
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+
+
+def resolve_root(explicit):
+    if explicit:
+        return os.path.realpath(explicit)
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        return os.path.realpath(out)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return os.path.realpath(os.getcwd())
+
+
+def load_json(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="build-vrm-prompt")
+    parser.add_argument("--wi-id", required=True, help="Work item ID (e.g., WI-014)")
+    parser.add_argument("--root", default=None, help="Repository root")
+    args = parser.parse_args()
+
+    root = resolve_root(args.root)
+    state_dir = os.path.join(root, ".agent-atelier")
+
+    # ── Load state ────────────────────────────────────────────────────
+    wi_path = os.path.join(state_dir, "work-items.json")
+    ls_path = os.path.join(state_dir, "loop-state.json")
+
+    if not os.path.exists(wi_path):
+        print(f"work-items.json not found at {wi_path}", file=sys.stderr)
+        return 3
+
+    if not os.path.exists(ls_path):
+        print(f"loop-state.json not found at {ls_path}", file=sys.stderr)
+        return 3
+
+    store = load_json(wi_path)
+    loop_state = load_json(ls_path)
+
+    # ── Find the work item ────────────────────────────────────────────
+    wi = None
+    for item in store.get("items", []):
+        if item.get("id") == args.wi_id:
+            wi = item
+            break
+
+    if wi is None:
+        available = [i.get("id") for i in store.get("items", [])]
+        print(f"Work item {args.wi_id} not found. Available: {available}", file=sys.stderr)
+        return 3
+
+    # ── Validate preconditions ────────────────────────────────────────
+    if wi.get("status") != "candidate_validating":
+        print(
+            f"Work item {args.wi_id} is in status '{wi.get('status')}', "
+            f"expected 'candidate_validating'",
+            file=sys.stderr,
+        )
+        return 2
+
+    active = loop_state.get("active_candidate")
+    if not active or active.get("work_item_id") != args.wi_id:
+        print(
+            f"Work item {args.wi_id} is not the active candidate",
+            file=sys.stderr,
+        )
+        return 2
+
+    # ── Assemble VRM evidence input ───────────────────────────────────
+    # Only use data from the work item and spec — no builder context.
+    promotion = wi.get("promotion", {})
+    branch = promotion.get("candidate_branch") or active.get("branch", "")
+    commit = promotion.get("candidate_commit") or active.get("commit", "")
+
+    # Build acceptance criteria refs from behaviors + input_artifacts
+    criteria_refs = []
+    for b in wi.get("behaviors", []):
+        criteria_refs.append(f"docs/product/behavior-spec.md#{b}")
+    for a in wi.get("input_artifacts", []):
+        if a not in criteria_refs:
+            criteria_refs.append(a)
+
+    # Build verification commands from the verify field
+    verify_commands = wi.get("verify", [])
+    if not verify_commands:
+        print(f"Error: work item '{args.wi_id}' has no verify commands — cannot build VRM input", file=sys.stderr)
+        return 2
+
+    output = {
+        "work_item_id": args.wi_id,
+        "behavior_spec_revision": wi.get("behavior_spec_revision", 1),
+        "target_branch": branch,
+        "target_commit": commit,
+        "acceptance_criteria_refs": criteria_refs if criteria_refs else [f"docs/product/behavior-spec.md"],
+        "files_expected": wi.get("owned_paths", []),
+        "verification_commands": verify_commands,
+        "relevant_constraints": wi.get("relevant_constraints", []),
+        "non_goals": wi.get("non_goals", []),
+        "forbidden_context": [
+            "builder_summary",
+            "builder_diff",
+            "builder_log",
+            "architect_interpretation",
+        ],
+    }
+
+    json.dump(output, sys.stdout, indent=2, ensure_ascii=False)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)

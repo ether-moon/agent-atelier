@@ -1,0 +1,13 @@
+{
+  "name": "agent-atelier",
+  "owner": {
+    "name": "ether-moon"
+  },
+  "plugins": [
+    {
+      "name": "agent-atelier",
+      "source": "./plugins/agent-atelier",
+      "description": "Autonomous product development loop — AI agent team that cycles through spec, implement, validate, and self-correct"
+    }
+  ]
+}

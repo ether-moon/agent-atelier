@@ -2,23 +2,84 @@
 
 **Date**: 2026-03-09
 **Purpose**: Consolidated factual research reference for agent-atelier
+**Status**: Background reference only. Project-specific rules are defined in `docs/design/*`, which take precedence over examples or source terminology in this document.
 
 ---
 
 ## Table of Contents
 
-1. [Anthropic's Agentic Design Patterns](#1-anthropics-agentic-design-patterns)
-2. [Claude Agent SDK](#2-claude-agent-sdk)
-3. [Claude Code Subagents](#3-claude-code-subagents)
-4. [Claude Code Agent Teams](#4-claude-code-agent-teams)
-5. [Open-Source Multi-Agent Frameworks](#5-open-source-multi-agent-frameworks)
-6. [Cross-Framework Patterns](#6-cross-framework-patterns)
-7. [Existing skill-set Patterns](#7-existing-skill-set-patterns)
-8. [Sources](#8-sources)
+1. [Coding Agent Architecture](#1-coding-agent-architecture)
+2. [Anthropic's Agentic Design Patterns](#2-anthropics-agentic-design-patterns)
+3. [Claude Agent SDK](#3-claude-agent-sdk)
+4. [Claude Code Subagents](#4-claude-code-subagents)
+5. [Claude Code Agent Teams](#5-claude-code-agent-teams)
+6. [Open-Source Multi-Agent Frameworks](#6-open-source-multi-agent-frameworks)
+7. [Cross-Framework Patterns](#7-cross-framework-patterns)
+8. [Existing skill-set Patterns](#8-existing-skill-set-patterns)
+9. [Sources](#9-sources)
 
 ---
 
-## 1. Anthropic's Agentic Design Patterns
+## 1. Coding Agent Architecture
+
+코딩 에이전트는 **LLM + 제어 루프 + 소프트웨어 하니스(harness)** 로 구성된 시스템으로, 코드 작성·수정·실행·피드백을 반복 수행한다.
+
+### 1.1 LLM, 추론 모델, 에이전트의 관계
+
+| 개념 | 역할 |
+|------|------|
+| **LLM** | 다음 토큰 예측 엔진 — 단독으로도 코딩 가능하나 복합적 맥락 관리 불가 |
+| **추론 모델(Reasoning Model)** | 중간 추론과 검증을 더 많이 수행하도록 훈련된 LLM |
+| **에이전트** | 모델 호출, 도구 사용, 상태 갱신, 종료 판단을 반복하는 제어 루프 |
+| **에이전트 하니스** | 제어 루프를 감싸는 소프트웨어 — 컨텍스트 관리, 도구 접근, 프롬프트 구성, 상태 제어 담당 |
+| **코딩 하니스** | 에이전트 하니스의 코딩 특화 형태 — 리포지토리 컨텍스트, 코드 실행, 테스트, 에러 점검 관리 |
+
+동일한 LLM이라도 하니스 설계에 따라 성능과 사용자 경험이 크게 달라진다. 오픈웨이트 모델도 잘 설계된 하니스에 통합되면 상용 수준의 성능을 낼 수 있다.
+
+### 1.2 오케스트레이션 관점에서의 핵심 구성 요소
+
+코딩 하니스의 6가지 구성 요소 중 오케스트레이션 설계에 직접 관련되는 것만 정리한다. 프롬프트 캐시, 컨텍스트 클리핑/요약, 세션 메모리 분리 등 하니스 내부 최적화는 제외.
+
+**1. 실시간 리포지토리 컨텍스트 (Live Repo Context)**
+- 각 에이전트가 현재 Git 리포 상태, 브랜치, 문서, 테스트 명령어 등을 인식해야 역할 수행 가능
+- 작업 전 리포 요약 정보를 수집하여 안정된 작업 기반(stable facts) 확보
+
+**2. 역할별 도구 접근 제한 (Tool Access Scoping)**
+- 오케스트레이터가 각 역할에 필요한 도구만 노출하여 작업 범위와 권한 경계 설정
+- 예: 리뷰어는 읽기 전용, 빌더는 쓰기 포함, 검증 역할은 실행 도구 접근
+
+**3. 하위 에이전트 위임 (Delegation With Bounded Subagents)**
+- 보조 작업을 병렬 처리하기 위해 하위 에이전트 생성 (심볼 정의 검색, 설정 파일 확인, 테스트 실패 분석 등)
+- 필요한 컨텍스트만 상속, 읽기 전용·재귀 깊이 제한 등으로 경계 설정
+
+### 1.3 실전 관찰
+
+**Progressive Disclosure (3-tier 컨텍스트 로딩)**
+- 다수의 스킬/에이전트를 운용할 때 컨텍스트 윈도우 예산 관리 전략
+- Metadata tier (항상 로드) → Body tier (트리거 시 로드) → References tier (온디맨드 로드)
+- 출처: [revfactory/harness](https://github.com/revfactory/harness)
+
+**Phase 0 Audit (기존 상태 감지 후 선택적 실행)**
+- 세션 재개 시 전체 워크플로를 처음부터 돌리지 않고, 기존 구성물(에이전트 정의, 스킬, 설정)을 먼저 스캔하여 필요한 단계만 선택 실행
+- 출처: [revfactory/harness](https://github.com/revfactory/harness)
+
+**Loop Guardrail + Reflection (반복 상한 + 반성 단계)**
+- 모든 에이전트에 MAX_ITERATIONS 상한 설정, 각 재시도 전 반성 프롬프트 강제: "무엇이 실패했나? 같은 접근을 반복하고 있나?"
+- 교착 에이전트 발생을 대폭 감소시키는 실전 패턴
+- 출처: Addy Osmani — Claude Code Swarms
+
+**Dedicated Reviewer Teammate (전담 리뷰어 패턴)**
+- 읽기 전용 Opus, lint/test/security 도구만 사용, TaskCompleted 이벤트에 자동 트리거
+- 빌더 3-4명당 리뷰어 1명 비율; 리드는 항상 검토 완료된 코드만 수신
+- 출처: Addy Osmani — Claude Code Swarms
+
+### 1.4 참고 구현
+
+- [Mini Coding Agent](https://github.com/rasbt/mini-coding-agent) — 위 구조를 순수 Python으로 구현한 최소 예시
+
+---
+
+## 2. Anthropic's Agentic Design Patterns
 
 From "Building Effective Agents" (Dec 2024). Anthropic distinguishes **Workflows** (predefined code paths) from **Agents** (LLMs dynamically directing their own processes) and recommends simple, composable patterns over complex frameworks.
 
@@ -38,11 +99,11 @@ From "Building Effective Agents" (Dec 2024). Anthropic distinguishes **Workflows
 
 ---
 
-## 2. Claude Agent SDK
+## 3. Claude Agent SDK
 
 Package: `@anthropic-ai/claude-agent-sdk` (TypeScript, v0.2.71) / `claude-agent-sdk` (Python, 3.10+). Wraps Claude Code CLI as a subprocess — the same runtime powering Claude Code.
 
-### 2.1 Subagent API
+### 3.1 Subagent API
 
 Subagents are defined via `agents` parameter in `query()`. Parent must include `"Agent"` in `allowedTools`.
 
@@ -98,7 +159,7 @@ def create_role_agent(role: str, permissions: list[str]) -> AgentDefinition:
     )
 ```
 
-### 2.2 Session Management
+### 3.2 Session Management
 
 | Operation | Python | TypeScript |
 |-----------|--------|------------|
@@ -127,7 +188,7 @@ await session.send("Hello!");
 for await (const msg of session.stream()) { ... }
 ```
 
-### 2.3 Hook System
+### 3.3 Hook System
 
 17 available hook events:
 
@@ -170,7 +231,7 @@ options = ClaudeAgentOptions(
 - `updatedInput`: modified tool input (requires `allow`)
 - Priority: deny > ask > allow across multiple hooks
 
-### 2.4 Permission Modes
+### 3.4 Permission Modes
 
 | Mode | Description |
 |------|-------------|
@@ -190,7 +251,7 @@ await q.set_permission_mode("acceptEdits")
 
 **Tool scoping:** `"Bash(npm:*)"` allows only npm commands in Bash.
 
-### 2.5 Tool Restrictions & Custom Tools
+### 3.5 Tool Restrictions & Custom Tools
 
 **Built-in tools:** `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Bash`, `WebSearch`, `WebFetch`, `Agent`, `Skill`, `AskUserQuestion`, `TodoWrite`, `ToolSearch`
 
@@ -210,7 +271,7 @@ state_server = create_sdk_mcp_server(
 
 Tools exposed as `mcp__<server-name>__<tool-name>`, requiring explicit `allowedTools` inclusion.
 
-### 2.6 MCP Integration
+### 3.6 MCP Integration
 
 **Programmatic:**
 ```python
@@ -239,7 +300,7 @@ options = ClaudeAgentOptions(
 
 **MCP servers and subagents:** Parent's `mcpServers` config is shared with subagents that inherit those tools.
 
-### 2.7 Cost & Token Limits
+### 3.7 Cost & Token Limits
 
 | Option | Python | TypeScript |
 |--------|--------|------------|
@@ -266,7 +327,7 @@ if message.subtype == "error_max_budget_usd":
         ...
 ```
 
-### 2.8 Practical Patterns
+### 3.8 Practical Patterns
 
 **Pattern 1: Parallel research subagents**
 ```
@@ -315,7 +376,7 @@ canUseTool: async (toolName, input) => {
 
 ---
 
-## 3. Claude Code Subagents
+## 4. Claude Code Subagents
 
 Three built-in subagent types:
 
@@ -340,11 +401,11 @@ Agent tool spawns subagents. Can restrict spawnable types using `Agent(worker, r
 
 ---
 
-## 4. Claude Code Agent Teams
+## 5. Claude Code Agent Teams
 
 Experimental feature (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`). Requires Opus 4.6+. Available since Claude Code v2.1.32.
 
-### 4.1 Team Definition & Spawning
+### 5.1 Team Definition & Spawning
 
 Teammates are spawned via natural language prompts, not pre-defined config files. The lead calls `spawnTeam` then spawns teammates via `Agent(team_name=...)`.
 
@@ -359,7 +420,7 @@ Teammates are spawned via natural language prompts, not pre-defined config files
 | `hooks` | **Silently ignored** | Yes |
 | Other frontmatter | **Silently ignored** | Yes |
 
-### 4.2 Tool Operations
+### 5.2 Tool Operations
 
 **TeammateTool (13 operations):**
 
@@ -378,7 +439,7 @@ Teammates are spawned via natural language prompts, not pre-defined config files
 
 **Task operations:** `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet` — shared across all team members.
 
-### 4.3 Communication Patterns
+### 5.3 Communication Patterns
 
 **Mailbox system:**
 - Storage: `~/.claude/teams/{name}/inboxes/{agent-name}.json` (JSON arrays)
@@ -400,7 +461,7 @@ Teammates are spawned via natural language prompts, not pre-defined config files
 - Idle notifications — automatic
 - Shared task list — passive coordination
 
-### 4.4 Task System
+### 5.4 Task System
 
 **States:** `pending` → `in_progress` (with owner) → `completed`
 
@@ -412,7 +473,7 @@ Teammates are spawned via natural language prompts, not pre-defined config files
 
 **Sizing:** 5-6 tasks per teammate. Too small = coordination overhead; too large = too long without check-ins.
 
-### 4.5 Team Lifecycle
+### 5.5 Team Lifecycle
 
 ```
 1. spawnTeam → creates config.json + task dirs + inbox dirs
@@ -446,7 +507,7 @@ Teammates are spawned via natural language prompts, not pre-defined config files
 
 **Heartbeat:** 5-minute timeout. Crashed workers' tasks can be reclaimed.
 
-### 4.6 Configuration
+### 5.6 Configuration
 
 **Enable:**
 ```json
@@ -477,7 +538,7 @@ Force via: `export CLAUDE_CODE_SPAWN_BACKEND=tmux|in-process`
 
 **Delegate mode:** `Shift+Tab` restricts lead to coordination-only tools. Prevents lead from competing with workers.
 
-### 4.7 Limitations
+### 5.7 Limitations
 
 | Limitation | Detail |
 |-----------|--------|
@@ -492,7 +553,7 @@ Force via: `export CLAUDE_CODE_SPAWN_BACKEND=tmux|in-process`
 | Partial custom agent support | `skills` and `hooks` frontmatter silently ignored (Issue #30703) |
 | Split panes limited | Not supported in VS Code terminal, Windows Terminal, Ghostty |
 
-### 4.8 Subagents vs. Agent Teams
+### 5.8 Subagents vs. Agent Teams
 
 | Aspect | Subagents | Agent Teams |
 |--------|-----------|-------------|
@@ -510,7 +571,7 @@ Force via: `export CLAUDE_CODE_SPAWN_BACKEND=tmux|in-process`
 
 ---
 
-## 5. Open-Source Multi-Agent Frameworks
+## 6. Open-Source Multi-Agent Frameworks
 
 ### Framework Comparison
 
@@ -527,9 +588,9 @@ Force via: `export CLAUDE_CODE_SPAWN_BACKEND=tmux|in-process`
 
 ---
 
-## 6. Cross-Framework Patterns
+## 7. Cross-Framework Patterns
 
-### 6.1 Agent Coordination Models
+### 8.1 Agent Coordination Models
 
 | Model | Description | Frameworks |
 |-------|-------------|------------|
@@ -539,14 +600,14 @@ Force via: `export CLAUDE_CODE_SPAWN_BACKEND=tmux|in-process`
 | **Parallel Fan-out/Fan-in** | Simultaneous distribution, consolidated results | LangGraph scatter-gather, ADK ParallelAgent |
 | **Conversational** | Multi-turn dialogue between agents | AutoGen's original pattern |
 
-### 6.2 Agent Communication Mechanisms
+### 8.2 Agent Communication Mechanisms
 
 - **Shared state**: Agents read/write to common state (LangGraph)
 - **Message passing**: Structured messages (AutoGen, ADK events)
 - **Direct delegation**: One agent explicitly calls another (CrewAI, OpenAI handoffs)
 - **LLM-routed**: LLM decides which agent handles subtask (ADK AutoFlow, Mastra)
 
-### 6.3 Agent Definition Commonalities
+### 8.3 Agent Definition Commonalities
 
 Every framework requires:
 1. **Identity**: Role/name/description
@@ -561,7 +622,7 @@ Optional additions:
 - Type-safe outputs (Pydantic AI)
 - Memory/persistence
 
-### 6.4 Configuration Approaches
+### 8.4 Configuration Approaches
 
 | Approach | Frameworks | Pros | Cons |
 |----------|------------|------|------|
@@ -570,7 +631,7 @@ Optional additions:
 | **Visual/Low-code** | Dify | Accessible | Limited customization |
 | **Markdown + Frontmatter** | Claude Code custom subagents | Natural for Claude skills | Claude-specific |
 
-### 6.5 Emerging Interoperability Standards
+### 8.5 Emerging Interoperability Standards
 
 - **Agent2Agent (A2A)**: Google-initiated, adopted by ADK, Pydantic AI, CrewAI
 - **Model Context Protocol (MCP)**: Anthropic-initiated, widely adopted for tool integration
@@ -578,9 +639,9 @@ Optional additions:
 
 ---
 
-## 7. Existing skill-set Patterns
+## 8. Existing skill-set Patterns
 
-### 7.1 Ralph — Sequential Loop with Fresh Context
+### 8.1 Ralph — Sequential Loop with Fresh Context
 
 - Two modes (PLANNING/BUILDING)
 - Spawns one Task subagent per iteration with fresh context
@@ -588,20 +649,20 @@ Optional additions:
 - **Progress**: Git commits + plan file hash changes
 - **Stuck detection**: 3 consecutive iterations with no progress
 
-### 7.2 Consulting-Peer-LLMs — Parallel Multi-Tool Execution
+### 8.2 Consulting-Peer-LLMs — Parallel Multi-Tool Execution
 
 - Detects installed CLI tools (gemini, codex, claude)
 - Launches all simultaneously in background
 - Waits for all, then synthesizes results
 - Shows raw responses first, then consolidates
 
-### 7.3 CodeRabbit-Feedback — Interactive Isolated Subagent
+### 8.3 CodeRabbit-Feedback — Interactive Isolated Subagent
 
 - Three phases: Collection → Discussion → Application
 - Severity classification (CRITICAL/MAJOR/MINOR)
 - Triple verification system for applied changes
 
-### 7.4 State Management Comparison
+### 8.4 State Management Comparison
 
 | Skill | State Location | Update Frequency | Context Sharing |
 |-------|---------------|-----------------|-----------------|
@@ -611,7 +672,7 @@ Optional additions:
 
 ---
 
-## 8. Sources
+## 9. Sources
 
 ### Anthropic Official
 - [Building Effective Agents](https://www.anthropic.com/research/building-effective-agents)
