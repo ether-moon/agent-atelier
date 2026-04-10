@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: ether-moon/knowledge-distillery
-          ref: main
+          ref: 0a38e19bafc7eb47328fbee17c4a2917c62d50a8  # pin to immutable SHA
           path: .knowledge-distillery-plugin
 
       - name: Configure git identity

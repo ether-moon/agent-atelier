@@ -152,7 +152,7 @@ def main():
         fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
 
         if args.replay:
-            return _replay(root, writes, deletes)
+            return _replay(root)
         else:
             return _commit(root, tx, writes, deletes)
     finally:
@@ -212,8 +212,12 @@ def _commit(root, tx, writes, deletes):
     return 0
 
 
-def _replay(root, writes, deletes):
+def _replay(root):
     """WAL replay: complete a partially applied transaction.
+
+    Reads the WAL file (.pending-tx.json) as the source of truth rather
+    than trusting stdin, preventing loss of pending recovery state if
+    stdin differs from what was originally written to the WAL.
 
     For each write, compare the file's current revision against the
     target revision in the WAL content:
@@ -221,6 +225,17 @@ def _replay(root, writes, deletes):
       - Matches expected (or file missing) → not yet applied, write it.
       - Neither → conflict (another writer intervened), report error.
     """
+    wal_path = os.path.join(root, ".agent-atelier/.pending-tx.json")
+    if not os.path.exists(wal_path):
+        json.dump({"committed": False, "reason": "wal_missing"}, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 4
+
+    with open(wal_path, encoding="utf-8") as fh:
+        tx = json.load(fh)
+    writes = tx.get("writes", [])
+    deletes = tx.get("deletes", [])
+
     artifacts = []
     skipped = []
 
@@ -258,7 +273,6 @@ def _replay(root, writes, deletes):
             skipped.append(d)
 
     # Remove WAL after successful replay
-    wal_path = os.path.join(root, ".agent-atelier/.pending-tx.json")
     try:
         os.unlink(wal_path)
     except OSError:
