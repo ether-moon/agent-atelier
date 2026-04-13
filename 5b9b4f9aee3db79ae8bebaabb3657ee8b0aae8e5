@@ -1,0 +1,20 @@
+## Decisions Made
+- Adopted all three CodeRabbit review findings as valid fixes: the inconsistency between prose instructions and the role table was genuine, the missing code fence language specifier was a valid lint issue, and the invalid model parameter on Agent() was confirmed by API analysis
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- Agent() for team spawning only accepts team_name and run_in_background; model must be specified via AgentDefinition() when defining subagents
+
+## Open Questions
+- None
+
+## Context
+Resolved PR review feedback on ether-moon/agent-atelier#4. CodeRabbit flagged three issues in plugins/agent-atelier/skills/run/SKILL.md: contradictory model assignment instructions, a missing code fence language specifier, and an invalid model parameter on the Agent() call. All three were verified against the current code and fixed.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
