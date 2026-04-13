@@ -61,10 +61,21 @@ log() {
   printf '%s [gate-watch] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
 }
 
+# json_escape — escape backslashes and double quotes for safe JSON embedding
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
+
 emit() {
   local event="$1" gate_id="$2" file="$3"
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  # Escape user-controlled strings for JSON safety
+  gate_id="$(json_escape "$gate_id")"
+  file="$(json_escape "$file")"
   printf '{"event":"%s","timestamp":"%s","gate_id":"%s","file":"%s"}\n' \
     "$event" "$ts" "$gate_id" "$file"
 }
@@ -87,9 +98,8 @@ snapshot_open_gates() {
   if [ ! -d "$gate_dir" ]; then
     return 0
   fi
-  # Use a subshell with ls to avoid glob expansion issues in Bash 3.2.
-  # Filter to *.json only. sort for stable ordering.
-  (cd "$gate_dir" && ls -1 *.json 2>/dev/null | sort) || true
+  # Use find for robust handling of special filenames (avoids SC2012/SC2035).
+  find "$gate_dir" -maxdepth 1 -name '*.json' -type f -exec basename {} \; 2>/dev/null | sort
 }
 
 # ── Diff & Emit ──────────────────────────────────────────────────────

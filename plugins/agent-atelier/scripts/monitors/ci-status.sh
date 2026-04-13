@@ -52,12 +52,24 @@ log() {
   printf '%s [ci-status] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
 }
 
+# json_escape — escape backslashes and double quotes for safe JSON embedding
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
+
 emit() {
   local status="$1" conclusion="$2" run_id="$3" url="$4"
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  # Escape user-controlled strings for JSON safety
+  local safe_run_id safe_url
+  safe_run_id="$(json_escape "$run_id")"
+  safe_url="$(json_escape "$url")"
   printf '{"event":"ci_status","timestamp":"%s","run_id":"%s","status":"%s","conclusion":%s,"url":"%s"}\n' \
-    "$ts" "$run_id" "$status" "$conclusion" "$url"
+    "$ts" "$safe_run_id" "$status" "$conclusion" "$safe_url"
 }
 
 # Quote a value for JSON: wraps in double quotes, or emits null for empty/null.
@@ -110,11 +122,11 @@ watch_run() {
       continue
     fi
 
-    # Parse fields via gh --jq (reliable, no fragile sed parsing).
+    # Parse fields from the already-fetched JSON via --jq (single call).
     local status conclusion url
-    status="$(gh run view "$run_id" --json status --jq '.status' 2>/dev/null || true)"
-    conclusion="$(gh run view "$run_id" --json conclusion --jq '.conclusion' 2>/dev/null || true)"
-    url="$(gh run view "$run_id" --json url --jq '.url' 2>/dev/null || true)"
+    local parsed
+    parsed="$(gh run view "$run_id" --json status,conclusion,url --jq '[.status, .conclusion, .url] | @tsv' 2>/dev/null)" || parsed=""
+    IFS=$'\t' read -r status conclusion url <<< "$parsed"
 
     # Normalize: gh may omit conclusion for in-progress runs.
     status="${status:-in_progress}"
@@ -179,9 +191,18 @@ watch_pr() {
     local has_pending=false
     local has_cancelled=false
 
-    # Parse each check state via gh --jq (reliable, no fragile sed parsing).
+    # Fetch all check states and first link in a single gh call.
+    local checks_raw
+    checks_raw="$(gh pr checks "$pr_number" --json state,link 2>/dev/null)" || checks_raw="[]"
+
+    # Parse states from the fetched JSON (use python3 as portable jq fallback).
     local states
-    states="$(gh pr checks "$pr_number" --json state --jq '.[].state' 2>/dev/null)" || states=""
+    states="$(printf '%s' "$checks_raw" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for c in data:
+    print(c.get('state', ''))
+" 2>/dev/null)" || states=""
 
     local state
     while IFS= read -r state; do
@@ -213,9 +234,13 @@ EOF
     local agg_conclusion
     agg_conclusion="$(json_str_or_null "$agg_conclusion_raw")"
 
-    # Use first check's link or fall back to PR url.
+    # Extract first check's link from already-fetched data, fall back to PR url.
     local checks_url
-    checks_url="$(gh pr checks "$pr_number" --json link --jq '.[0].link // ""' 2>/dev/null)" || checks_url=""
+    checks_url="$(printf '%s' "$checks_raw" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print(data[0].get('link', '') if data else '')
+" 2>/dev/null)" || checks_url=""
     checks_url="${checks_url:-$pr_url}"
 
     local cur_key="${agg_status}:${agg_conclusion_raw}"

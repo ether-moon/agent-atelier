@@ -505,8 +505,8 @@ assert d['event'] == 'state_committed', f\"event={d['event']}\"
 assert 'timestamp' in d, 'missing timestamp'
 assert d['revision'] == 7, f\"revision={d['revision']}\"
 assert 'work-items.json' in d['mutations'], f\"mutations={d['mutations']}\"
-# Compact NDJSON: no spaces after colons or commas
-assert ': ' not in sys.argv[1].split('\"timestamp\"')[0], 'not compact JSON'
+# Compact NDJSON: full canonical compact encoding check
+assert sys.argv[1] == json.dumps(d, ensure_ascii=False, separators=(',', ':')), 'not compact JSON'
 " "$LAST_EVENT" 2>/dev/null; then
     pass "Event line is compact NDJSON with correct fields (event, timestamp, revision, mutations)"
   else

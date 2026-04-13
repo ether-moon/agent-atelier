@@ -332,9 +332,11 @@ ET_PID=$!
 sleep 1
 
 # Append events — one matching, one not matching
-echo '{"event":"state_committed","revision":1,"timestamp":"2026-04-08T00:00:00Z"}' >> "$ET_STATE/events.ndjson"
-echo '{"event":"something_else","data":"ignored"}' >> "$ET_STATE/events.ndjson"
-echo '{"event":"state_committed","revision":2,"timestamp":"2026-04-08T00:01:00Z"}' >> "$ET_STATE/events.ndjson"
+{
+  echo '{"event":"state_committed","revision":1,"timestamp":"2026-04-08T00:00:00Z"}'
+  echo '{"event":"something_else","data":"ignored"}'
+  echo '{"event":"state_committed","revision":2,"timestamp":"2026-04-08T00:01:00Z"}'
+} >> "$ET_STATE/events.ndjson"
 
 # Wait for propagation
 sleep 2
@@ -435,7 +437,7 @@ for output_file in "$TMPDIR"/hb-output.txt "$TMPDIR"/hb-output2.txt "$TMPDIR"/gw
 import json, sys
 d = json.loads(sys.argv[1])
 assert 'event' in d, 'missing event field'
-assert 'timestamp' in d or d.get('event') == 'state_committed', 'missing timestamp field'
+assert 'timestamp' in d, 'missing timestamp field'
 " "$line" 2>/dev/null; then
       ALL_VALID=false
       break

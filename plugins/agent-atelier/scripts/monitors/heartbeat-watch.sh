@@ -228,8 +228,22 @@ while true; do
           # Same severity as before — suppress duplicate
           ;;
         *)
-          printf '{"event":"heartbeat_warning","timestamp":"%s","work_item_id":"%s","lease_expires_at":"%s","remaining_seconds":%d,"severity":"%s","owner_session_id":"%s"}\n' \
-            "$current_iso" "$wi_id" "$lease" "$remaining" "$severity" "$owner"
+          jq -cn \
+            --arg timestamp "$current_iso" \
+            --arg work_item_id "$wi_id" \
+            --arg lease_expires_at "$lease" \
+            --argjson remaining_seconds "$remaining" \
+            --arg severity "$severity" \
+            --arg owner_session_id "$owner" \
+            '{
+              event: "heartbeat_warning",
+              timestamp: $timestamp,
+              work_item_id: $work_item_id,
+              lease_expires_at: $lease_expires_at,
+              remaining_seconds: $remaining_seconds,
+              severity: $severity,
+              owner_session_id: $owner_session_id
+            }'
           ;;
       esac
     fi

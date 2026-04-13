@@ -21,10 +21,12 @@ FILTER=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --state-dir)
+      [ $# -lt 2 ] && { echo "ERROR: --state-dir requires an argument" >&2; exit 1; }
       STATE_DIR="$2"
       shift 2
       ;;
     --filter)
+      [ $# -lt 2 ] && { echo "ERROR: --filter requires an argument" >&2; exit 1; }
       FILTER="$2"
       shift 2
       ;;

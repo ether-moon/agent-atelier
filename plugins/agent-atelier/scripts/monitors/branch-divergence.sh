@@ -108,6 +108,14 @@ iso_timestamp() {
   python3 -c "from datetime import datetime,timezone; print(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))" 2>/dev/null || echo "unknown"
 }
 
+# json_escape — escape backslashes and double quotes for safe JSON embedding
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
+
 # emit_event — write a single JSON event line to stdout
 emit_event() {
   local behind="$1"
@@ -116,9 +124,14 @@ emit_event() {
   local ts
   ts=$(iso_timestamp)
 
+  # Escape user-controlled strings for JSON safety
+  local safe_branch safe_sha
+  safe_branch="$(json_escape "$BASE_BRANCH")"
+  safe_sha="$(json_escape "$short_sha")"
+
   # Build JSON without external dependencies (Bash 3.2+ safe)
   printf '{"event":"branch_divergence","timestamp":"%s","base_branch":"%s","commits_behind":%d,"last_base_commit":"%s","severity":"%s"}\n' \
-    "$ts" "$BASE_BRANCH" "$behind" "$short_sha" "$severity"
+    "$ts" "$safe_branch" "$behind" "$safe_sha" "$severity"
 }
 
 # ── Main loop ─────────────────────────────────────────────────────────
