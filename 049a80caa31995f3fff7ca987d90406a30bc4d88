@@ -1,0 +1,20 @@
+## Decisions Made
+- Align SKILL.md with the script rather than the other way around: ci-status.sh has a well-structured exit code scheme (1=usage, 2=auth/CLI, 3=not found, 4=runtime) and changing the script would break that scheme and existing tests.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Scanned PR #2 for remaining blockers after three prior fix rounds (99c6155, ea4ad5a, c99a2f5). CI passing, no merge conflicts. Found one unresolved CodeRabbit comment (id 3070959668) about exit code mismatch between SKILL.md and ci-status.sh. Fixed by updating SKILL.md line 224 to document exit code 2 instead of 4 for gh unavailability.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
