@@ -37,32 +37,32 @@ Use Agent Teams to create one flat team for the development loop.
 
 ### Core Team (Always-On — 4 Roles)
 
-Read the role prompts from `references/prompts/` and spawn teammates:
+Read the role prompts from `references/prompts/` and spawn teammates. Use Sonnet for every teammate:
 
 ```
 spawnTeam("agent-atelier-dev")
 ```
 
-Then spawn each core teammate with their prompt:
+Then spawn each core teammate with their prompt (specify `model="sonnet"` for each):
 
-| Role | Prompt Source | Mode |
-|------|-------------|------|
-| State Manager | `references/prompts/state-manager.md` | `acceptEdits` |
-| PM | `references/prompts/pm.md` | `acceptEdits` |
-| Architect | `references/prompts/architect.md` | `acceptEdits` |
+| Role | Prompt Source | Mode | Model |
+|------|-------------|------|-------|
+| State Manager | `references/prompts/state-manager.md` | `acceptEdits` | `sonnet` |
+| PM | `references/prompts/pm.md` | `acceptEdits` | `opus` |
+| Architect | `references/prompts/architect.md` | `acceptEdits` | `opus` |
 
-The **Orchestrator** role is played by the lead agent (you) — do not spawn a separate teammate for it. Read `references/prompts/orchestrator.md` as your own operating guide.
+The **Orchestrator** role is played by the lead agent (you) — do not spawn a separate teammate for it. Read `references/prompts/orchestrator.md` as your own operating guide. Orchestrator, PM, and Architect use Opus (judgment-heavy roles); all other teammates use Sonnet (execution-focused roles).
 
 ### Conditional Specialists (Spawned On-Demand)
 
-| Role | When to Spawn | Prompt Source | When to Shutdown |
-|------|--------------|-------------|------------------|
-| Builder(s) | WI enters `ready` and BUILD_PLAN/IMPLEMENT phase | `references/prompts/builder.md` | After WI completion or requeue |
-| VRM | Candidate enters `active_candidate` | `references/prompts/vrm.md` | After evidence bundle produced |
-| QA Reviewer | REVIEW_SYNTHESIS phase begins | `references/prompts/qa-reviewer.md` | After findings submitted |
-| UX Reviewer | REVIEW_SYNTHESIS phase begins | `references/prompts/ux-reviewer.md` | After findings submitted |
+| Role | When to Spawn | Prompt Source | When to Shutdown | Model |
+|------|--------------|-------------|------------------|-------|
+| Builder(s) | WI enters `ready` and BUILD_PLAN/IMPLEMENT phase | `references/prompts/builder.md` | After WI completion or requeue | `sonnet` |
+| VRM | Candidate enters `active_candidate` | `references/prompts/vrm.md` | After evidence bundle produced | `sonnet` |
+| QA Reviewer | REVIEW_SYNTHESIS phase begins | `references/prompts/qa-reviewer.md` | After findings submitted | `sonnet` |
+| UX Reviewer | REVIEW_SYNTHESIS phase begins | `references/prompts/ux-reviewer.md` | After findings submitted | `sonnet` |
 
-Spawn conditional roles with `Agent(team_name="agent-atelier-dev", run_in_background=true)`.
+Spawn conditional roles with `Agent(team_name="agent-atelier-dev", model="sonnet", run_in_background=true)`.
 Shut down via `requestShutdown` when their phase ends.
 
 ### Team Roster Injection
