@@ -1,0 +1,20 @@
+## Decisions Made
+- Patch bump (0.1.0 → 0.1.1): monitor 통합 1건의 feat이 있지만 대부분 fix/improve이므로 patch가 적절
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Version bump to 0.1.1. Changelog updated with all changes since 0.1.0 — monitor scripts integration, orchestration overhead reduction rules, state-commit fixes, and test expansion from 47 to 52 assertions.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
