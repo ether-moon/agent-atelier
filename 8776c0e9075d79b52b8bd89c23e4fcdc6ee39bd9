@@ -1,0 +1,28 @@
+## Decisions Made
+- Use CronCreate polling (~2 min) as the event consumption mechanism: CronCreate fires when the REPL is idle, which matches the orchestrator's wait periods between teammate interactions. This avoids complex event-driven wiring while providing near-real-time detection.
+- 3-layer monitoring architecture (Detection/Decision/Recovery): monitors augment rather than replace the watchdog. Monitors provide early warning (10-60s), watchdog provides mechanical recovery (15-min ticks). Both layers operate concurrently.
+- ci-status spawned on-demand during VALIDATE only: unlike the other 4 always-on monitors, ci-status requires a run-id or PR number that only exists when CI is triggered. It self-terminates on completion.
+- Compact NDJSON separators in state-commit event emission: json.dumps default separators include spaces after colons, but event-tail.sh uses grep -F for filtering which requires exact string matching. Using separators=(",",":") follows NDJSON convention and ensures grep compatibility.
+- Monitors are observation-only with no state schema changes: preserves the sole-writer guarantee of state-commit. All state mutations triggered by events route through orchestrator to appropriate skills.
+
+## Problems Encountered
+- heartbeat-watch.sh had a `local` keyword used outside function context (line 190): Bash rejects `local` in the main script body, causing silent failure. Fixed by removing the `local` declaration.
+- json.dumps/grep -F format mismatch between state-commit and event-tail: state-commit emitted `"event": "state_committed"` (with space) but event-tail grepped for `"event":"state_committed"` (no space). Detected via code review, fixed with compact separators.
+- _emit_event used tx["writes"] for revision extraction during replay, including skipped files: the revision field could reference a file that was already applied in the crashed session. Fixed to only count artifacts actually written in the current invocation.
+
+## Constraints Identified
+- CronCreate jobs are session-scoped and expire after 7 days: monitor infrastructure must be re-created on every cold resume via recovery protocol Step 6b.
+- Monitor task IDs are ephemeral: they exist only in conversation context and the CronCreate prompt text. No persistent storage needed or wanted.
+- event-tail.sh uses grep -F (fixed-string): any JSON format change in state-commit event emission must maintain grep -F compatibility. The compact NDJSON format is now tested explicitly.
+
+## Open Questions
+- None
+
+## Context
+This session integrated 5 pre-existing monitor scripts into the agent-atelier orchestration loop. The scripts were production-ready but completely disconnected from the /run lifecycle. We created a new /monitors skill, rewrote Phase 4 of the /run skill to use CronCreate-based polling, updated the orchestrator prompt with event urgency rules, added Step 6b to the recovery protocol, and fixed 3 bugs (heartbeat-watch local keyword, json.dumps format mismatch, replay revision ambiguity). A code review caught the json.dumps/grep mismatch as a real integration bug. All 52 tests pass.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
