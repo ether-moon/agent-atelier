@@ -95,6 +95,13 @@ check_gh() {
   fi
 }
 
+check_python3() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    log "ERROR: python3 not found in PATH (required for --pr mode)"
+    exit 4
+  fi
+}
+
 # ── Mode: --run-id ───────────────────────────────────────────────────
 # Uses `gh run view` to poll a single Actions run until it reaches a
 # terminal status. We poll ourselves rather than using `gh run watch`
@@ -163,6 +170,9 @@ watch_pr() {
 
   log "watching PR #$pr_number checks"
 
+  # Validate python3 is available (required for JSON parsing in PR mode).
+  check_python3
+
   # Validate the PR exists.
   local pr_url
   if ! pr_url="$(gh pr view "$pr_number" --json url --jq '.url' 2>&1)"; then
@@ -197,12 +207,20 @@ watch_pr() {
 
     # Parse states from the fetched JSON (use python3 as portable jq fallback).
     local states
-    states="$(printf '%s' "$checks_raw" | python3 -c "
+    if ! states="$(printf '%s' "$checks_raw" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 for c in data:
     print(c.get('state', ''))
-" 2>/dev/null)" || states=""
+" 2>&1)"; then
+      log "ERROR: failed to parse check states — $states"
+      exit 4
+    fi
+
+    if [ -z "$states" ] && [ "$checks_raw" != "[]" ]; then
+      log "ERROR: parsed empty states from non-empty checks response"
+      exit 4
+    fi
 
     local state
     while IFS= read -r state; do
@@ -236,11 +254,14 @@ EOF
 
     # Extract first check's link from already-fetched data, fall back to PR url.
     local checks_url
-    checks_url="$(printf '%s' "$checks_raw" | python3 -c "
+    if ! checks_url="$(printf '%s' "$checks_raw" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 print(data[0].get('link', '') if data else '')
-" 2>/dev/null)" || checks_url=""
+" 2>&1)"; then
+      log "WARN: failed to parse checks URL — falling back to PR URL"
+      checks_url=""
+    fi
     checks_url="${checks_url:-$pr_url}"
 
     local cur_key="${agg_status}:${agg_conclusion_raw}"
@@ -269,12 +290,14 @@ main() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --run-id)
+        [ -z "$mode" ] || { log "ERROR: --run-id and --pr are mutually exclusive"; usage; exit 1; }
         [ $# -ge 2 ] || { log "ERROR: --run-id requires an argument"; usage; exit 1; }
         mode="run"
         target="$2"
         shift 2
         ;;
       --pr)
+        [ -z "$mode" ] || { log "ERROR: --run-id and --pr are mutually exclusive"; usage; exit 1; }
         [ $# -ge 2 ] || { log "ERROR: --pr requires an argument"; usage; exit 1; }
         mode="pr"
         target="$2"

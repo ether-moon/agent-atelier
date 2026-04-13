@@ -81,9 +81,11 @@ fi
 echo ""
 echo "--- heartbeat-watch integration ---"
 
-# Check jq availability (heartbeat-watch requires it)
+# Check jq and timeout availability (heartbeat-watch requires both)
 if ! command -v jq >/dev/null 2>&1; then
   echo "  SKIP: jq not found — heartbeat-watch integration tests require jq"
+elif ! command -v timeout >/dev/null 2>&1; then
+  echo "  SKIP: timeout not found — heartbeat-watch integration tests require timeout"
 else
 
   # Setup: create state dir with a work item whose lease expires soon
