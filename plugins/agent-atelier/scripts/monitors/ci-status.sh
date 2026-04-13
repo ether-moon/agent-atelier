@@ -122,17 +122,15 @@ watch_run() {
   fi
 
   while true; do
-    local raw
-    if ! raw="$(gh run view "$run_id" --json status,conclusion,url 2>&1)"; then
-      log "WARN: transient error fetching run $run_id — $raw"
+    # Single API call: fetch and parse fields via --jq in one shot.
+    local parsed
+    if ! parsed="$(gh run view "$run_id" --json status,conclusion,url --jq '[.status, .conclusion, .url] | @tsv' 2>&1)"; then
+      log "WARN: transient error fetching run $run_id — $parsed"
       sleep 15
       continue
     fi
 
-    # Parse fields from the already-fetched JSON via --jq (single call).
     local status conclusion url
-    local parsed
-    parsed="$(gh run view "$run_id" --json status,conclusion,url --jq '[.status, .conclusion, .url] | @tsv' 2>/dev/null)" || parsed=""
     IFS=$'\t' read -r status conclusion url <<< "$parsed"
 
     # Normalize: gh may omit conclusion for in-progress runs.
@@ -201,9 +199,8 @@ watch_pr() {
     local has_pending=false
     local has_cancelled=false
 
-    # Fetch all check states and first link in a single gh call.
-    local checks_raw
-    checks_raw="$(gh pr checks "$pr_number" --json state,link 2>/dev/null)" || checks_raw="[]"
+    # Reuse the already-fetched `raw` payload (no second API call).
+    local checks_raw="$raw"
 
     # Parse states from the fetched JSON (use python3 as portable jq fallback).
     local states
