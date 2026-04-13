@@ -465,6 +465,88 @@ else
   fail "Absolute delete path removed a file outside .agent-atelier"
 fi
 
+# ── Test 15: Event emission to events.ndjson ─────────────────────────
+# After a successful commit, state-commit should append a compact NDJSON
+# event to events.ndjson with the "state_committed" event type.
+
+EVENTS_FILE="$TMPDIR/.agent-atelier/events.ndjson"
+
+# Count existing events (may have been emitted by prior tests)
+EVENTS_BEFORE=0
+if [ -f "$EVENTS_FILE" ]; then
+  EVENTS_BEFORE=$(wc -l < "$EVENTS_FILE" | tr -d ' ')
+fi
+
+# Perform a successful commit (bump from rev 6 to 7)
+echo '{
+  "writes": [{
+    "path": ".agent-atelier/work-items.json",
+    "expected_revision": 6,
+    "content": {"revision": 7, "updated_at": "2026-04-08T06:00:00Z", "items": [{"id": "WI-001", "status": "done", "revision": 7}]},
+    "message": "event-test commit"
+  }],
+  "message": "verify event emission"
+}' | "$COMMIT" --root "$TMPDIR" >/dev/null
+
+if [ -f "$EVENTS_FILE" ]; then
+  EVENTS_AFTER=$(wc -l < "$EVENTS_FILE" | tr -d ' ')
+  if [ "$EVENTS_AFTER" -gt "$EVENTS_BEFORE" ]; then
+    pass "events.ndjson grew after commit"
+  else
+    fail "events.ndjson did not grow after commit (before=$EVENTS_BEFORE after=$EVENTS_AFTER)"
+  fi
+
+  # Validate the last line is compact NDJSON with expected fields
+  LAST_EVENT=$(tail -1 "$EVENTS_FILE")
+  if python3 -c "
+import json, sys
+d = json.loads(sys.argv[1])
+assert d['event'] == 'state_committed', f\"event={d['event']}\"
+assert 'timestamp' in d, 'missing timestamp'
+assert d['revision'] == 7, f\"revision={d['revision']}\"
+assert 'work-items.json' in d['mutations'], f\"mutations={d['mutations']}\"
+# Compact NDJSON: no spaces after colons or commas
+assert ': ' not in sys.argv[1].split('\"timestamp\"')[0], 'not compact JSON'
+" "$LAST_EVENT" 2>/dev/null; then
+    pass "Event line is compact NDJSON with correct fields (event, timestamp, revision, mutations)"
+  else
+    fail "Event line format or content is incorrect: $LAST_EVENT"
+  fi
+
+  # Verify the event can be matched by event-tail's grep -F pattern
+  if echo "$LAST_EVENT" | grep -qF '"event":"state_committed"'; then
+    pass "Event line matches event-tail grep -F filter pattern"
+  else
+    fail "Event line does NOT match grep -F '\"event\":\"state_committed\"' — event-tail will miss it"
+  fi
+else
+  fail "events.ndjson not created after commit"
+fi
+
+# ── Test 16: Stale-revision rejection does NOT emit event ────────────
+if [ -f "$EVENTS_FILE" ]; then
+  EVENTS_BEFORE=$(wc -l < "$EVENTS_FILE" | tr -d ' ')
+fi
+
+echo '{
+  "writes": [{
+    "path": ".agent-atelier/work-items.json",
+    "expected_revision": 1,
+    "content": {"revision": 99}
+  }]
+}' | "$COMMIT" --root "$TMPDIR" 2>/dev/null || true
+
+if [ -f "$EVENTS_FILE" ]; then
+  EVENTS_AFTER=$(wc -l < "$EVENTS_FILE" | tr -d ' ')
+  if [ "$EVENTS_AFTER" -eq "$EVENTS_BEFORE" ]; then
+    pass "No event emitted for rejected (stale-revision) commit"
+  else
+    fail "Event emitted for rejected commit"
+  fi
+else
+  pass "No event emitted for rejected commit (no events file)"
+fi
+
 # ── Summary ──────────────────────────────────────────────────────────
 echo ""
 echo "Mutation flow: ${PASS} passed, ${FAIL} failed"

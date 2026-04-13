@@ -109,7 +109,7 @@ else
 fi
 
 # ── Expected skills exist ────────────────────────────────────────────
-EXPECTED_SKILLS="init status wi execute gate watchdog candidate validate run"
+EXPECTED_SKILLS="init status wi execute gate watchdog candidate validate run monitors"
 for skill_name in $EXPECTED_SKILLS; do
   skill_path="$ROOT/plugins/agent-atelier/skills/$skill_name/SKILL.md"
   if [ -f "$skill_path" ]; then
@@ -179,6 +179,17 @@ if [ -x "$ROOT/tests/mutation_flow.sh" ]; then
   fi
 else
   echo "  SKIP: tests/mutation_flow.sh not found or not executable"
+fi
+
+# ── Monitor script tests ────────────────────────────────────────────
+if [ -x "$ROOT/tests/monitor_scripts.sh" ]; then
+  if "$ROOT/tests/monitor_scripts.sh"; then
+    pass "Monitor script tests pass"
+  else
+    fail "Monitor script tests failed"
+  fi
+else
+  echo "  SKIP: tests/monitor_scripts.sh not found or not executable"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────

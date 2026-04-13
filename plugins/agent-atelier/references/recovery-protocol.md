@@ -61,6 +61,12 @@ Apply all mechanical recovery changes (stale lease expiry, candidate demotion) i
 
 Start a new orchestration loop (`/agent-atelier:run`). The orchestrator reads the recovered state and spawns fresh teammates based on the current mode and WI states.
 
+### Step 6b: Re-Spawn Monitors
+
+Invoke `/agent-atelier:monitors spawn` to start fresh always-on monitors (heartbeat, gate, events, divergence). Create a new `CronCreate` poll job with the returned task IDs. Previous session's monitors and cron jobs are gone — they were session-scoped and died with the crashed session.
+
+If CI validation was in progress when the session crashed (i.e., `active_candidate` is non-null and mode is VALIDATE), check whether a ci-status monitor needs to be spawned for the active candidate's CI run via `/agent-atelier:monitors spawn-ci`.
+
 ### Step 7: Resume From Committed State Only
 
 Fresh teammates receive context only from:

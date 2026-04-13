@@ -44,3 +44,13 @@ All paths are relative to the repository root (detected via `git rev-parse --sho
 | `docs/product/assumptions.md` | Impact x Uncertainty matrix |
 | `docs/product/open-questions.md` | Unresolved items |
 | `docs/product/decision-log.md` | Decision rationale log |
+
+## Monitor Scripts
+
+| Path | Purpose |
+|------|---------|
+| `plugins/agent-atelier/scripts/monitors/heartbeat-watch.sh` | Lease expiry early warning |
+| `plugins/agent-atelier/scripts/monitors/gate-watch.sh` | Gate state change detection |
+| `plugins/agent-atelier/scripts/monitors/event-tail.sh` | Semantic event stream tail |
+| `plugins/agent-atelier/scripts/monitors/ci-status.sh` | CI/PR status polling |
+| `plugins/agent-atelier/scripts/monitors/branch-divergence.sh` | Base branch divergence detection |
