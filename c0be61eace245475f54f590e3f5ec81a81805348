@@ -1,0 +1,20 @@
+## Decisions Made
+- Include plugin.json in bumping-version skill: the skill only listed CHANGELOG.md, causing the plugin manifest version to be missed during bump workflow
+
+## Problems Encountered
+- Plugin version 0.1.1 bump missed plugin.json update: root cause was bumping-version skill not listing plugin.json in its Files section
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Fixed the bumping-version skill to include `plugins/agent-atelier/.claude-plugin/plugin.json` in its Files section alongside CHANGELOG.md. This ensures future version bumps update both the changelog and the plugin manifest.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
