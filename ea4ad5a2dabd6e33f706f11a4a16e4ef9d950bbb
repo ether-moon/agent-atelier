@@ -1,0 +1,24 @@
+## Decisions Made
+- Make python3 parse failures fatal (exit 4) rather than non-fatal fallback: Silent failures in the state-parsing pipeline cause false-positive "success" emissions, which is worse than a hard failure the operator can diagnose.
+- Use preflight check_python3 function over inline guards: Keeps the pattern consistent with existing check_gh and makes the error message actionable before entering the poll loop.
+- Add mutual-exclusion guard at parse time rather than post-parse validation: Catches the conflict on the first duplicate flag rather than after both have been processed.
+- Guard timeout with command -v alongside jq check using elif chain: Avoids nesting another if block and keeps the skip message pattern consistent with the existing jq guard.
+
+## Problems Encountered
+- Round-2 CodeRabbit review identified that python3 parse failures silently produced empty state arrays, causing the aggregate logic to fall through to "completed/success": Resolved by making the parse pipeline fatal and adding an empty-states-from-non-empty-response guard.
+- The URL extraction pipeline had the same silent-failure pattern: Resolved with a non-fatal fallback to PR URL since this is cosmetic, not correctness-critical.
+
+## Constraints Identified
+- The heartbeat-watch tests depend on GNU timeout which is not available on all platforms (notably vanilla macOS): The test must skip gracefully rather than fail with "command not found".
+
+## Open Questions
+- None
+
+## Context
+Scanned PR #2 (explore-monitor-tool -> main) for blockers after a previous round resolved 7 CodeRabbit comments. Found 3 new round-2 comments (2 Major, 1 Minor) on ci-status.sh and tests/monitor_scripts.sh. All three were addressed: python3 runtime check, fatal parse errors, mutual-exclusion flag validation, and timeout preflight guard. All 52 tests pass.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
