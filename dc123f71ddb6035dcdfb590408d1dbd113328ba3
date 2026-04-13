@@ -1,0 +1,20 @@
+## Decisions Made
+- Applied both CodeRabbit findings (actionable + nitpick) rather than dismissing the nitpick: both changes are low-risk and improve doc consistency
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- Project hook blocks direct git commit; must use memento-commit skill for all commits
+
+## Open Questions
+- None
+
+## Context
+Scanned PR #3 (reduce-repeated-steps) for blockers. No merge conflicts or CI failures were found. CodeRabbit left two review comments: a markdownlint MD040 violation on a fenced code block in SKILL.md and a nitpick about silent-tick predicate drift in orchestrator.md. Both were resolved in a single commit.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
