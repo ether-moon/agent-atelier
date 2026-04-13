@@ -69,7 +69,7 @@ Shut down via `requestShutdown` when their phase ends.
 
 When spawning each teammate, append a `## TEAM ROSTER` section to the role prompt with the canonical names of all other active teammates and their roles. Example:
 
-```
+```markdown
 ## TEAM ROSTER
 
 Your teammates in this session:

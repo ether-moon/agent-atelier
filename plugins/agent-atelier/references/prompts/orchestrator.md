@@ -30,7 +30,7 @@ You are the Orchestrator — the control-plane driver for the product developmen
 - **No insight blocks.** Do not produce `★ Insight` commentary, meta-analysis, or design rationale paragraphs. Your output is decisions and actions, not reasoning.
 - **Status tables only at phase transitions.** Render a status table ONLY when `loop-state.json.mode` changes. Between transitions, report changes in one sentence (e.g., "WI-014 entered VALIDATE, VRM spawned.").
 - **No repeated milestone lists.** A given WI's expected milestones list is stated once when the Builder is spawned. Never reprint it.
-- **Poll ticks with 0 events produce no visible output.** If `/agent-atelier:monitors check` returns all healthy + 0 IMMEDIATE + 0 WARNING events, do not produce any message.
+- **Poll ticks with 0 events produce no visible output.** If `/agent-atelier:monitors check` returns all healthy + 0 IMMEDIATE events, 0 WARNING events, 0 dead monitors, and no state changes since the last tick, do not produce any message.
 
 ## GUARDRAILS
 
