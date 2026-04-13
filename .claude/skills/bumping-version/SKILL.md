@@ -10,6 +10,7 @@ Bump the cc-plugin-template version: analyze changes, suggest semver level, get 
 ## Files
 
 - **Changelog**: `CHANGELOG.md` → prepend new entry at top (after header)
+- **Plugin manifest**: `plugins/agent-atelier/.claude-plugin/plugin.json` → update `"version"` field
 
 ## Workflow
 
