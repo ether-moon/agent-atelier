@@ -1,0 +1,24 @@
+## Decisions Made
+- Use bash parameter expansion for JSON escaping in monitors without jq dependency: Keeps monitors portable (Bash 3.2+) without adding a jq requirement to scripts that currently lack it
+- Use jq -cn for heartbeat-watch JSON emission: heartbeat-watch already requires jq (checked on startup), so jq -cn is the natural safe-encoding choice there
+- Parse ci-status check data with python3 fallback instead of jq: ci-status does not require jq, so python3 (already used elsewhere) serves as the portable JSON parser for the consolidated API response
+- Address all 7 actionable CodeRabbit comments plus 5 nitpicks in a single pass: Batch resolution avoids multiple push/CI cycles
+
+## Problems Encountered
+- ci-status API consolidation left a stale gh pr checks call on first edit: Caught during post-edit review and removed the redundant line before committing
+
+## Constraints Identified
+- Monitor scripts target Bash 3.2+ without jq as a hard dependency (except heartbeat-watch): JSON escaping must use parameter expansion, not jq, in branch-divergence, ci-status, and gate-watch
+- gh CLI does not support piping stdin for re-parsing: The consolidated ci-status watch_pr section must re-parse the fetched JSON via python3 rather than piping raw JSON back into gh
+
+## Open Questions
+- None
+
+## Context
+Scanned PR #2 (explore-monitor-tool -> main) for blockers. No merge conflicts or CI failures found. CodeRabbit left 7 actionable review comments (JSON injection risks across 4 monitor scripts, orchestrator prompt urgency tier mismatch, event-tail argument validation, test hardening) plus 5 nitpicks (API efficiency, SC2129 grouping, find vs ls, canonical compact check). All comments addressed, all 52 tests pass.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
