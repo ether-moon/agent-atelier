@@ -56,6 +56,16 @@ Add to your project's `.claude/settings.json`:
 }
 ```
 
+Claude Code 설정에 다음 환경변수가 필요합니다:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
+```
+
 Requires Claude Code with Opus 4.6 (Agent Teams support) and Python 3.
 
 ## Usage
