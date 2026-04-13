@@ -1,0 +1,21 @@
+## Decisions Made
+- Merged two gh run view calls into a single --jq call in watch_run: avoids introducing a python3 dependency while eliminating the redundant fetch
+- Reused existing `raw` variable in watch_pr instead of adding a new fetch: simpler and the payload already contains all required fields (name, state, link)
+
+## Problems Encountered
+- Round-3 CodeRabbit review surfaced two redundant API call patterns that could cause incorrect state transitions on transient network failures: one in watch_run (double gh run view), one in watch_pr (double gh pr checks)
+
+## Constraints Identified
+- watch_run must not depend on python3 since check_python3 is only called in watch_pr mode: ruled out python3-based JSON parsing for the run watcher fix
+
+## Open Questions
+- None
+
+## Context
+Scanned PR #2 for blockers after two prior fix rounds (commits 99c6155 and ea4ad5a). Found CI passing, no merge conflicts, 10 of 12 review threads resolved. The 2 unresolved threads were round-3 CodeRabbit comments on ci-status.sh about redundant API calls that could cause false state transitions. Fixed both in a single commit. All 52 tests pass.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
