@@ -22,7 +22,7 @@ This skill starts the full autonomous development loop. It spawns the agent team
 
 ## Allowed Tools
 
-- Read, Write, Bash, Glob, Agent (for team spawning)
+- Read, Write, Bash, Glob, Agent (for team spawning), CronCreate, CronDelete
 
 ## Phase 1: Pre-Flight Check
 
@@ -64,6 +64,16 @@ The **Orchestrator** role is played by the lead agent (you) — do not spawn a s
 
 Spawn conditional roles with `Agent(team_name="agent-atelier-dev", run_in_background=true)`.
 Shut down via `requestShutdown` when their phase ends.
+
+### Monitor Infrastructure
+
+After spawning the team, start background monitors for continuous state observation:
+
+1. **Spawn monitors.** Invoke `/agent-atelier:monitors spawn` — returns a JSON mapping of monitor names to background task IDs (heartbeat, gate, events, divergence).
+2. **Create poll job.** Use `CronCreate` with cron `"*/2 * * * *"` (fires roughly every 2 minutes when idle). The prompt should invoke `/agent-atelier:monitors check` with the task ID mapping and follow the response protocol documented in the monitors skill.
+3. **Store handles.** Keep the CronCreate job ID and the task ID mapping in conversation context for later cleanup. These are session-scoped — they do not survive restarts.
+
+The monitors provide early warning (10–60 second detection) while the watchdog provides mechanical recovery (15-minute ticks). Both layers operate concurrently.
 
 ## Phase 3: State Machine Loop
 
@@ -176,15 +186,40 @@ On cold resume, the Orchestrator reads this file to restore review state. If a W
 
 ### DONE
 - All WIs complete with evidence. Report results to user.
+- **Monitor cleanup:** Stop all monitors via `/agent-atelier:monitors stop all`. Cancel the CronCreate poll job via `CronDelete` with the stored job ID.
 - `cleanup` the team resources.
 
 ## Phase 4: Continuous Monitoring
 
-While the loop runs:
-- **Heartbeat:** Remind active Builders to send `execute heartbeat` every 30 minutes
-- **Watchdog:** Run `watchdog tick` periodically (every 15 minutes or at phase transitions)
-- **Gate check:** Scan for open gates and present them to the user when found
-- **Budget check:** Monitor operating budgets and escalate when thresholds approach
+Monitoring runs concurrently with the state machine loop via two mechanisms:
+
+### CronCreate Polling (Every ~2 Minutes)
+
+The poll job created in Phase 2 fires when the REPL is idle. On each tick:
+
+1. Invoke `/agent-atelier:monitors check` with the stored task ID mapping.
+2. **IMMEDIATE events** — act within this polling cycle:
+   - `heartbeat_warning` (expired) → trigger `/agent-atelier:watchdog tick`
+   - `heartbeat_warning` (warning) → message Builder via `write()` to send `execute heartbeat`
+   - `gate_resolved` → re-read gate state, resume blocked WIs
+   - `gate_opened` → present HDR to user immediately
+   - `ci_status` (success) → proceed with VALIDATE → REVIEW_SYNTHESIS transition
+   - `ci_status` (failure/cancelled) → record validation failure, candidate demotion
+   - `branch_divergence` (critical) → inform user, strongly recommend rebase
+3. **WARNING events** — log for next human-visible status report.
+4. **Dead monitors** — re-spawn via `/agent-atelier:monitors spawn`. If same monitor has died 3+ times, escalate to user.
+
+### Watchdog Ticks (Every 15 Minutes or at Phase Transitions)
+
+Run `/agent-atelier:watchdog tick` for mechanical recovery independent of monitors:
+- Stale lease requeue
+- Expired candidate clearing and next-candidate promotion
+- Budget enforcement
+- Long-open gate warnings
+
+### CI Monitor (On-Demand)
+
+When entering VALIDATE mode and triggering a CI run, spawn a ci-status monitor: `/agent-atelier:monitors spawn-ci --run-id <ID>` (or `--pr <NUM>`). The ci-status monitor self-terminates when CI reaches a terminal state. The CronCreate polling picks up the `ci_status` event and triggers the appropriate phase transition.
 
 ## Human Gate Protocol
 
@@ -223,7 +258,9 @@ Returns JSON to stdout on completion:
 - If a teammate crashes: the watchdog detects stale leases and recovers mechanically
 - If the loop gets stuck: budget checks flag it before it becomes a problem
 - If a WI fails repeatedly (3x same fingerprint): escalate to human review
-- If the user interrupts: save state, requeue active work, report status
+- If the user interrupts: save state, requeue active work, stop monitors, cancel poll job, report status
+- If a monitor crashes: CronCreate polling detects it via dead-monitor report → orchestrator re-spawns
+- If same monitor crashes 3+ times in a session: escalate to user instead of retrying
 
 ## Constraints
 

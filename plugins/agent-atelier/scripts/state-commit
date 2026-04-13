@@ -33,6 +33,7 @@ so the validate→write window is race-free even with parallel agents.
 Exit codes: 0=success, 1=usage/invalid transaction, 2=stale revision, 4=runtime error
 """
 
+import datetime
 import fcntl
 import json
 import os
@@ -110,6 +111,50 @@ def serialize(content):
     if isinstance(content, (dict, list)):
         return json.dumps(content, indent=2, ensure_ascii=False) + "\n"
     return str(content)
+
+
+def _emit_event(root, tx, artifacts):
+    """Append a semantic event to events.ndjson after a successful commit.
+
+    The event stream is advisory — if the append fails (disk full, permissions,
+    etc.) the error is logged to stderr but does NOT fail the transaction.
+    """
+    try:
+        # Derive the new revision from the committed artifacts: use the highest
+        # revision among written files that were actually applied (present in
+        # the artifacts list).  During replay, skipped files are excluded so the
+        # event revision reflects only what changed in *this* invocation.
+        artifact_set = set(artifacts)
+        new_revision = None
+        for w in tx.get("writes", []):
+            if w.get("path") not in artifact_set:
+                continue
+            rev = content_revision(w.get("content"))
+            if rev is not None:
+                if new_revision is None or rev > new_revision:
+                    new_revision = rev
+
+        # mutations: the file basenames that were actually touched
+        mutations = [os.path.basename(a) for a in artifacts]
+
+        # summary: prefer the transaction's message field, fall back to generic
+        summary = tx.get("message") or "state committed"
+
+        event = {
+            "event": "state_committed",
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+            "revision": new_revision,
+            "request_id": tx.get("request_id"),
+            "mutations": mutations,
+            "summary": summary,
+        }
+
+        events_path = os.path.join(root, ".agent-atelier", "events.ndjson")
+        os.makedirs(os.path.dirname(events_path), exist_ok=True)
+        with open(events_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
+    except Exception as exc:
+        print(f"state-commit: event emit failed: {exc}", file=sys.stderr)
 
 
 def main():
@@ -224,6 +269,13 @@ def _commit(root, tx, writes, deletes):
 
     json.dump({"committed": True, "artifacts": artifacts}, sys.stdout, indent=2)
     sys.stdout.write("\n")
+
+    # ── Emit semantic event ──────────────────────────────────────────
+    # Append a structured NDJSON event to events.ndjson so downstream
+    # monitors can react to state changes without polling raw files.
+    # This is advisory — failures are logged but do not fail the tx.
+    _emit_event(root, tx, artifacts)
+
     return 0
 
 
@@ -311,6 +363,12 @@ def _replay(root):
         "skipped": skipped,
     }, sys.stdout, indent=2)
     sys.stdout.write("\n")
+
+    # Emit a state_committed event so downstream monitors see WAL recoveries.
+    # Uses the same advisory pattern as _commit — failures are logged, not raised.
+    if artifacts:
+        _emit_event(root, tx, artifacts)
+
     return 0
 
 
