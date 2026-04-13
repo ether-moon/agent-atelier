@@ -1,0 +1,20 @@
+## Decisions Made
+- None
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Added the CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS environment variable requirement to README.md Installation section per user request. Trivial documentation-only change.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
