@@ -221,7 +221,7 @@ All subcommands return JSON to stdout. Diagnostic messages go to stderr.
 | Condition | Exit Code | Action |
 |-----------|-----------|--------|
 | Monitor script not found at expected path | `4` | Report missing path, suggest plugin integrity check |
-| `gh` not available (for `spawn-ci`) | `4` | Report dependency missing |
+| `gh` not available (for `spawn-ci`) | `2` | Report dependency missing |
 | `jq` not available (for `spawn` heartbeat) | `4` | Report dependency missing |
 | TaskOutput returns error | `0` | Flag monitor as dead in check report |
 | All monitors dead on check | `0` | Return report with all in `dead_monitors` — orchestrator decides action |
