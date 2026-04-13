@@ -37,13 +37,13 @@ Use Agent Teams to create one flat team for the development loop.
 
 ### Core Team (Always-On — 4 Roles)
 
-Read the role prompts from `references/prompts/` and spawn teammates. Use Sonnet for every teammate:
+Read the role prompts from `references/prompts/` and spawn teammates:
 
-```
+```bash
 spawnTeam("agent-atelier-dev")
 ```
 
-Then spawn each core teammate with their prompt (specify `model="sonnet"` for each):
+Then spawn each core teammate with their prompt and assigned model:
 
 | Role | Prompt Source | Mode | Model |
 |------|-------------|------|-------|
@@ -62,7 +62,7 @@ The **Orchestrator** role is played by the lead agent (you) — do not spawn a s
 | QA Reviewer | REVIEW_SYNTHESIS phase begins | `references/prompts/qa-reviewer.md` | After findings submitted | `sonnet` |
 | UX Reviewer | REVIEW_SYNTHESIS phase begins | `references/prompts/ux-reviewer.md` | After findings submitted | `sonnet` |
 
-Spawn conditional roles with `Agent(team_name="agent-atelier-dev", model="sonnet", run_in_background=true)`.
+Spawn conditional roles with `Agent(team_name="agent-atelier-dev", run_in_background=true)`.
 Shut down via `requestShutdown` when their phase ends.
 
 ### Team Roster Injection
