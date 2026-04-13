@@ -1,0 +1,21 @@
+## Decisions Made
+- Opus for Orchestrator/PM/Architect, Sonnet for remaining roles: PM and Architect require strong judgment for spec hardening and work-item decomposition, while execution roles (Builder, VRM, reviewers) are structured enough for Sonnet
+- PM and Architect initially set to Sonnet, then upgraded to Opus after discussion: user agreed these judgment-heavy roles benefit from stronger reasoning, especially during SPEC_HARDEN mutual auditing
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- Agent Teams model specification is natural language or subagent-definition based, not a formal API parameter: the SKILL.md tables and pseudo-code serve as orchestrator instructions, actual enforcement depends on Claude interpreting them correctly at spawn time
+
+## Open Questions
+- Actual runtime verification pending: model assignment cannot be confirmed without running the full loop and inspecting team config
+
+## Context
+Added per-role model selection to the agent-atelier run skill. Reviewed Claude Code Agent Teams documentation to confirm model specification approach. After discussing tradeoffs, settled on Opus for judgment-heavy roles (Orchestrator, PM, Architect) and Sonnet for execution-focused roles (State Manager, Builder, VRM, QA/UX Reviewer).
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
