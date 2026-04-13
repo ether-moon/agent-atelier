@@ -1,0 +1,20 @@
+## Decisions Made
+- None
+
+## Problems Encountered
+- plugin.json version이 CHANGELOG bump 시 누락됨: bumping-version 스킬이 CHANGELOG만 업데이트하고 plugin.json을 포함하지 않았음
+
+## Constraints Identified
+- bumping-version 스킬의 파일 목록에 plugin.json이 없음 — 향후 스킬 수정 필요
+
+## Open Questions
+- None
+
+## Context
+CHANGELOG은 0.1.1로 올렸으나 plugin.json이 0.1.0으로 남아있어 보정 커밋 추가.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
