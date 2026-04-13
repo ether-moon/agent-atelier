@@ -65,6 +65,23 @@ The **Orchestrator** role is played by the lead agent (you) — do not spawn a s
 Spawn conditional roles with `Agent(team_name="agent-atelier-dev", run_in_background=true)`.
 Shut down via `requestShutdown` when their phase ends.
 
+### Team Roster Injection
+
+When spawning each teammate, append a `## TEAM ROSTER` section to the role prompt with the canonical names of all other active teammates and their roles. Example:
+
+```
+## TEAM ROSTER
+
+Your teammates in this session:
+- **state-manager** — exclusive writer for .agent-atelier/ state files
+- **pm** — spec owner, writes docs/product/
+- **architect** — decomposes spec into work items
+
+Send messages to teammates using their exact name above. Do not guess names.
+```
+
+When conditional specialists are spawned (Builder, VRM, reviewers), include the current full roster in their prompt AND broadcast the new teammate's name and role to all existing teammates via `write()`.
+
 ### Monitor Infrastructure
 
 After spawning the team, start background monitors for continuous state observation:
@@ -208,6 +225,7 @@ The poll job created in Phase 2 fires when the REPL is idle. On each tick:
    - `branch_divergence` (critical) → inform user, strongly recommend rebase
 3. **WARNING events** — log for next human-visible status report.
 4. **Dead monitors** — re-spawn via `/agent-atelier:monitors spawn`. If same monitor has died 3+ times, escalate to user.
+5. **Silent ticks.** If the check report contains 0 IMMEDIATE events, 0 WARNING events, 0 dead monitors, and no state changes since the last tick — produce no user-visible output. The Orchestrator should not print "all healthy, 0 events" messages. Only report when there is something to act on or escalate.
 
 ### Watchdog Ticks (Every 15 Minutes or at Phase Transitions)
 

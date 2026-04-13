@@ -107,3 +107,10 @@ When initializing state files, use these exact defaults. Timestamps should be UT
   }
 }
 ```
+
+### HDR Contract Notes
+
+- **New file revision:** When creating a new HDR file via `state-commit`, use `expected_revision: null` (not `0`). The value `0` will cause a stale-revision rejection because new files have no prior revision.
+- **Immutable after creation:** HDR files have no `revision` field and are never updated in place. To amend a resolved gate, create a new HDR referencing the original.
+- **Schema is authoritative:** Only the fields in the template above are valid. Do not add top-level fields (e.g., a top-level `resolved_at` duplicating `resolution.resolved_at`). State Manager should flag any non-template fields as schema drift.
+- **`_index.md` revision:** The `_index.md` file also uses `expected_revision: null` in state-commit transactions, as it has no revision tracking.
