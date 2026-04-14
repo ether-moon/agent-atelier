@@ -57,4 +57,56 @@ if [[ -f "$WAL_FILE" ]]; then
   echo "Run '/agent-atelier:init' or '/agent-atelier:watchdog tick' to replay it before exiting."
 fi
 
+# Check for leaked team resources (Agent Teams cleanup not run)
+# Resolve team name: loop-state.json team_name → prefix search fallback
+TEAM_NAME=""
+LOOP_STATE="$STATE_DIR/loop-state.json"
+if [[ -f "$LOOP_STATE" ]]; then
+  TEAM_NAME=$(python3 -c "
+import json, sys
+with open(sys.argv[1]) as f:
+    print(json.load(f).get('team_name') or '')
+" "$LOOP_STATE" 2>/dev/null || echo "")
+fi
+
+# Fallback: search for any agent-atelier-* team directory
+if [[ -z "$TEAM_NAME" ]]; then
+  TEAMS_BASE="$HOME/.claude/teams"
+  if [[ -d "$TEAMS_BASE" ]]; then
+    for d in "$TEAMS_BASE"/agent-atelier-*; do
+      if [[ -d "$d" ]]; then
+        TEAM_NAME=$(basename "$d")
+        break
+      fi
+    done
+  fi
+fi
+
+if [[ -n "$TEAM_NAME" ]]; then
+  TEAM_DIR="$HOME/.claude/teams/$TEAM_NAME"
+  if [[ -d "$TEAM_DIR" ]]; then
+    TEAM_MEMBERS=$(python3 - "$TEAM_DIR/config.json" <<'PY' 2>/dev/null || echo ""
+import json, sys, os
+config_path = sys.argv[1]
+if not os.path.isfile(config_path):
+    sys.exit(0)
+with open(config_path) as f:
+    config = json.load(f)
+members = config.get("members", [])
+if members:
+    names = [m.get("name", "unknown") for m in members]
+    print("; ".join(names))
+PY
+)
+
+    if [[ -n "$TEAM_MEMBERS" ]]; then
+      echo "WARNING: Agent team '$TEAM_NAME' still has active members: $TEAM_MEMBERS"
+      echo "Run the DONE cleanup checklist: shutdown teammates -> clean up team -> verify."
+    else
+      echo "WARNING: Agent team directory exists at $TEAM_DIR but has no members."
+      echo "Consider running team cleanup to remove stale resources."
+    fi
+  fi
+fi
+
 exit 0

@@ -20,6 +20,7 @@ Every work item has these fields. Missing fields get the defaults shown below.
   "owner_role": "builder",
   "owner_session_id": null,
   "depends_on": [],
+  "complexity": "simple",
   "behaviors": [],
   "input_artifacts": [],
   "owned_paths": [],
@@ -48,6 +49,10 @@ Every work item has these fields. Missing fields get the defaults shown below.
 
 `pending` | `ready` | `implementing` | `candidate_queued` | `candidate_validating` | `reviewing` | `blocked_on_human_gate` | `done`
 
+## Valid Complexity Values
+
+`simple` | `complex`
+
 ## Normalization Rules
 
 Apply these rules every time a work item is created or updated:
@@ -75,6 +80,12 @@ When status is NOT `blocked_on_human_gate` and the caller did not explicitly set
 
 ### 6. Revision bump
 Increment the work item's `revision` by 1 on every write.
+
+### 7. Complexity field
+`complexity` must be one of `simple` or `complex`. If null or missing, default to `"simple"`. Reject any other value.
+
+### 8. depends_on immutability
+`depends_on` is immutable after the initial upsert. If a work item already exists and has a non-empty `depends_on`, reject any upsert that changes its value. This prevents native task dependency drift — the Agent Teams API supports `addBlockedBy` but not removal, so stale blockers cannot be cleaned up. If dependency restructuring is needed, the Architect should create a new WI with the correct dependencies and retire the old one.
 
 ## Upsert Merge Logic
 

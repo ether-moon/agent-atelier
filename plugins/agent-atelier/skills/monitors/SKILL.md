@@ -139,7 +139,7 @@ Reads accumulated output from all active monitors and classifies events by urgen
 
 - **IMMEDIATE events:** Act within this polling cycle.
   - `heartbeat_warning` (expired) → trigger `/agent-atelier:watchdog tick`
-  - `heartbeat_warning` (warning) → message Builder via `write()` to send `execute heartbeat`
+  - `heartbeat_warning` (warning) → message Builder via `SendMessage` to send `execute heartbeat`
   - `gate_resolved` → re-read gate state, resume blocked WIs
   - `gate_opened` → present HDR to user immediately
   - `ci_status` (success) → proceed with VALIDATE → REVIEW_SYNTHESIS transition

@@ -46,7 +46,7 @@ else
 fi
 
 # ── Hook type wiring ─────────────────────────────────────────────────
-EXPECTED_HOOK_TYPES="UserPromptSubmit PreToolUse Stop SubagentStop TaskCompleted"
+EXPECTED_HOOK_TYPES="UserPromptSubmit PreToolUse Stop SubagentStop TaskCompleted TaskCreated TeammateIdle"
 for htype in $EXPECTED_HOOK_TYPES; do
   if python3 -c "import json, sys; d=json.load(open(sys.argv[1])); assert sys.argv[2] in d['hooks']" "$HOOKS_FILE" "$htype" 2>/dev/null; then
     pass "hook type '$htype' wired in hooks.json"
