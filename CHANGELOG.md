@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.3] - 2026-04-14
+
+### Added
+
+- **run**: DONE phase completion report with single recommended next action (PR creation, validation, CI check)
+- **run**: native Agent Teams task integration — dual-layer WI/task model with automatic dependency wiring
+- **run**: plan approval workflow — complex WIs spawn Builders in plan mode, Orchestrator reviews via structured protocol
+
+### Improved
+
+- **hooks**: TaskCompleted (artifact verification), TeammateIdle (auto-assignment), TaskCreated (budget validation)
+- **bumping-version**: plugin.json added to version bump file list
+
 ## [0.1.1] - 2026-04-13
 
 ### Added

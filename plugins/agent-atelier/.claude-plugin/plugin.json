@@ -1,7 +1,7 @@
 {
   "name": "agent-atelier",
   "description": "Autonomous product development loop — AI agent team that cycles through spec, implement, validate, and self-correct",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "author": {
     "name": "ether-moon"
   }
