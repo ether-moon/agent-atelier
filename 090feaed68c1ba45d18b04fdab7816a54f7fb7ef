@@ -1,0 +1,20 @@
+## Decisions Made
+- patch bump (0.1.2 → 0.1.3): 기존 기능 개선 및 새 기능 추가이나 브레이킹 체인지 없음
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+PR #5 머지 후 패치 버전 범프. DONE 보고 기능, Agent Teams API 정렬, plan approval 워크플로우 등 반영.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
