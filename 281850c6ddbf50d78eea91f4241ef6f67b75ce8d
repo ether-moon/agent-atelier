@@ -1,0 +1,21 @@
+## Decisions Made
+- DONE 체크리스트 step 6을 "Report results and suggest next actions"로 확장: 사용자가 루프 완료 후 아무 보고 없이 idle 대기하는 것이 문제라고 피드백
+- Output Contract에 suggested_next_actions 배열 추가: 상태 기반 조건부 제안 (create_pr, run_validation, review_diffs, deploy)
+
+## Problems Encountered
+- 루프 완료 후 teammate들이 idle 상태로 남아 사용자에게 보고나 제안 없이 대기: DONE 체크리스트에 후속 액션 제안 로직이 부재했음
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+사용자가 agent-atelier 루프 완료 후 오케스트레이터가 조용히 idle 되는 동작에 대해 피드백. run/SKILL.md의 DONE 단계 step 6을 확장하여 완료 현황 보고와 후속 액션 제안을 능동적으로 전달하도록 수정. Output Contract에 suggested_next_actions 배열 추가.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
