@@ -9,7 +9,7 @@
 
 ## 프롬프트
 
-```
+```text
 이 세션은 agent-atelier 플러그인의 Agent Teams API 가정을 실증 검증하기 위한 테스트 세션이다.
 3가지 미검증 항목을 순서대로 테스트하고, 각 결과를 tests/manual/verification-results.json에 기록한다.
 모든 테스트 완료 후 반드시 팀을 정리(TeamDelete)한다.

@@ -39,7 +39,7 @@ Use Agent Teams to create one flat team for the development loop.
 
 Create the team and spawn teammates using subagent definitions from `.claude/agents/`:
 
-```
+```text
 TeamCreate(team_name="agent-atelier-dev", description="Autonomous product development loop")
 ```
 

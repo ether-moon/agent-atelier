@@ -73,12 +73,14 @@ fi
 if [[ -z "$TEAM_NAME" ]]; then
   TEAMS_BASE="$HOME/.claude/teams"
   if [[ -d "$TEAMS_BASE" ]]; then
+    shopt -s nullglob
     for d in "$TEAMS_BASE"/agent-atelier-*; do
       if [[ -d "$d" ]]; then
         TEAM_NAME=$(basename "$d")
         break
       fi
     done
+    shopt -u nullglob
   fi
 fi
 

@@ -91,7 +91,8 @@ if role in ("builder",):
 
 elif role in ("vrm", "validator"):
     if active_candidate and mode in ("VALIDATE", "IMPLEMENT"):
-        print(f"Active candidate exists: {active_candidate}. "
+        wi_id = active_candidate.get("work_item_id", str(active_candidate))
+        print(f"Active candidate exists: {wi_id}. "
               f"Begin validation using the evidence from build-vrm-prompt.")
     elif candidate_queue:
         print(f"Candidates in queue: {len(candidate_queue)}. "

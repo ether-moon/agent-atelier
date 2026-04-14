@@ -61,7 +61,7 @@ If the same approach has been tried twice, do NOT retry a third time. Escalate t
 
 Complex WIs spawn Builders with `mode: "plan"`. The Builder starts in read-only plan mode — Write/Edit are blocked by the harness. When the Builder calls `ExitPlanMode`, you receive a structured `plan_approval_request` containing `request_id`, `planFilePath`, and `planContent`.
 
-1. **Receive the request.** A `plan_approval_request` message arrives via `SendMessage` with a `request_id`. Read the `planContent` field for the proposed plan.
+1. **Receive the request.** A `plan_approval_request` message arrives via `SendMessage` with a `request_id`. Read the `planContent` field for the plan.
 2. **Review criteria.** Approve only if ALL of these hold:
    - Plan stays within the WI's `owned_paths` — no out-of-scope changes
    - Every `verify` item in the WI is addressed by the plan
