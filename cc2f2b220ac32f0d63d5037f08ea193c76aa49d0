@@ -1,0 +1,21 @@
+## Decisions Made
+- Add simplicity-first as Operating Rule #1 for Architect: User explicitly requested the Architect prioritize simple, concise decisions and avoid over-engineering above all else.
+- Add anti-over-engineering guardrail: Reinforces the operating rule with a concrete NEVER directive banning speculative abstractions and premature generalizations.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- Architect prompt changes affect all future agent team runs: The role prompt is loaded into subagent context, so wording must be precise and actionable.
+
+## Open Questions
+- None
+
+## Context
+User requested the Architect role prompt be updated to prioritize simplicity and avoid over-engineering as the top decision criterion. Added a new Operating Rule #1 ("Simplest thing that works") and a new GUARDRAIL ("NEVER over-engineer") to `plugins/agent-atelier/references/prompts/architect.md`. Both changes were concise additions without restructuring the existing prompt.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
