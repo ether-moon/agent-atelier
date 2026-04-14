@@ -79,24 +79,22 @@ if not role:
 
 # --- Work assignment by role ---
 if role in ("builder",):
-    ready = [wi for wi in items if wi.get("status") == "ready"]
-    if ready:
-        wi = ready[0]
-        print(f"There is a ready work item to claim: {wi['id']} — {wi.get('title', 'untitled')}. "
-              f"Use '/agent-atelier:execute claim {wi['id']}' to start implementing.")
-    elif mode == "AUTOFIX":
-        reviewing = [wi for wi in items if wi.get("status") == "reviewing"]
-        if reviewing:
-            print(f"AUTOFIX mode active. Check with the Orchestrator for bug fixes on {reviewing[0]['id']}.")
+    # Builders NEVER get exit 2 (keep working) from this hook.
+    # Reason: exit 2 feedback creates an unbreakable loop — builder processes
+    # feedback, goes idle, hook fires again, same feedback, repeat. During this
+    # loop the builder cannot receive SendMessage from the team lead.
+    # Instead: allow idle (exit 0). The Orchestrator receives the idle
+    # notification and dispatches work via SendMessage.
+    pass
 
 elif role in ("vrm", "validator"):
     if active_candidate and mode in ("VALIDATE", "IMPLEMENT"):
         wi_id = active_candidate.get("work_item_id", str(active_candidate))
         print(f"Active candidate exists: {wi_id}. "
               f"Begin validation using the evidence from build-vrm-prompt.")
-    elif candidate_queue:
-        print(f"Candidates in queue: {len(candidate_queue)}. "
-              f"Ask the Orchestrator to activate the next candidate.")
+    # No active_candidate → VRM cannot act. Allow idle and let Orchestrator
+    # activate the next candidate + message VRM when ready. Sending repeated
+    # "ask the Orchestrator" messages creates a token-burning idle loop.
 
 elif role in ("qa-reviewer", "ux-reviewer"):
     reviewing = [wi for wi in items if wi.get("status") == "reviewing"]

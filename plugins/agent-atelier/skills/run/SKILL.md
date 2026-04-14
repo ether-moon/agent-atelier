@@ -84,14 +84,16 @@ For complex WIs: `"Spawn a teammate using the builder agent type to implement WI
 
 ### TeammateIdle Auto-Assignment
 
-The `TeammateIdle` hook (`on-teammate-idle.sh`) automatically detects when a teammate is about to go idle and feeds back the next assignable work item. This eliminates the ~2 minute polling delay for work assignment:
+The `TeammateIdle` hook (`on-teammate-idle.sh`) automatically detects when a teammate is about to go idle and feeds back role-appropriate guidance. This eliminates the ~2 minute polling delay for work assignment:
 
-- **Builders:** Directed to the next `ready` WI via `/agent-atelier:execute claim`
+- **Builders:** Always allowed to go idle (exit 0). The Orchestrator receives the idle notification and dispatches work via `SendMessage`. Builders never receive exit 2 (keep working) feedback — this prevents unbreakable idle loops where the agent becomes unresponsive to team lead commands.
 - **VRM:** Directed to the active candidate for validation
 - **Reviewers:** Directed to WIs in `reviewing` status during REVIEW_SYNTHESIS
 - **Core team (SM, PM, Architect):** Kept alive while orchestration is active in their relevant phases
 
 If no work is available for the teammate's role, the hook allows idle (exit 0) and the teammate shuts down gracefully.
+
+**Builder claim flow:** Builder idle → Orchestrator receives idle notification → Orchestrator evaluates `work-items.json` for `ready` WIs → Orchestrator directs SM to call `/agent-atelier:execute claim` → SM writes state → Orchestrator dispatches Builder via `SendMessage`. This prevents both phantom claims (Builders self-serving) and idle loops (exit 2 feedback trapping agents).
 
 ### Team Roster Injection
 
@@ -119,6 +121,23 @@ After spawning the team, start background monitors for continuous state observat
 3. **Store handles.** Keep the CronCreate job ID and the task ID mapping in conversation context for later cleanup. These are session-scoped — they do not survive restarts.
 
 The monitors provide early warning (10–60 second detection) while the watchdog provides mechanical recovery (15-minute ticks). Both layers operate concurrently.
+
+### Active Worktree Hygiene
+
+During an active loop, `.agent-atelier/**` is live runtime state. Do not treat it like ordinary dirty git state.
+
+- Never use `git checkout`, `git restore`, `git stash`, or `git clean` on `.agent-atelier/**`
+- Never stash or revert teammate-owned WIP just to make your own commit easier
+- If you need a narrow commit, stage only the files you own with explicit pathspecs
+- If runtime state appears corrupted, recover through State Manager, watchdog, or the recovery protocol — not git cleanup commands
+
+For incident reporting during the loop, separate:
+
+- **Confirmed facts** — direct observations from logs, state, or command output
+- **Hypotheses** — likely causes that still need confirmation
+- **Next actions** — the immediate safe step you will take
+
+This keeps recovery decisions grounded and reduces accidental state destruction during fast triage.
 
 ## Phase 3: State Machine Loop
 
