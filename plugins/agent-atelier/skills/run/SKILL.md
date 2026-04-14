@@ -237,11 +237,23 @@ All WIs complete with evidence. Execute the team cleanup checklist in order:
 3. **Cancel poll job:** `CronDelete` with the stored job ID.
 4. **Shutdown teammates:** Send `SendMessage({type: "shutdown_request"})` to each active teammate. Wait for all to reach idle/stopped state.
 5. **Clean up team:** Call `TeamDelete` to remove team resources. **Only the lead (Orchestrator) may run cleanup** — teammates running cleanup can leave resources inconsistent.
-6. **Report results:** Present final status dashboard to user.
+6. **Report results and recommend next step:** Present a concise completion report followed by one recommended action.
+
+   **Completion report** — two parts only:
+   - **What was built:** One sentence summarizing the outcome in user terms, derived from WI titles/descriptions (e.g., "번역 키 CRUD + 인라인 편집 + Playwright e2e 테스트 구현 완료"). Never list raw WI counts or commit SHAs — the user cares about capabilities, not bookkeeping.
+   - **Issues to flag** (only if present): Validation gaps, failed attempts that were worked around, warnings from the review phase. Omit this section entirely if everything is clean.
+
+   **Recommended next step** — pick the single most logical action based on current state, in this priority order:
+   1. Validation gaps exist → flag which WIs lack evidence and offer to run validation
+   2. On a feature branch with commits not yet in a PR → offer to create the PR
+   3. PR already exists but CI hasn't run → offer to check CI status
+   4. Everything clean → report complete, ask if there's anything else
+
+   Present the recommendation as a direct offer (e.g., "PR 생성할까요?" or "WI-003 validation이 빠져있어요. 실행할까요?"), not a menu of options. The user can always redirect. If the user picks the offered action, execute it immediately without further confirmation.
 
 ### Cleanup Verification
 
-After executing the 6-step checklist, verify each step actually succeeded before reporting to the user:
+After executing the cleanup checklist, verify each step actually succeeded before reporting to the user:
 
 **Primary success conditions** (all must pass):
 1. Re-read `work-items.json` — confirm zero non-`done` items and `active_candidate` is null.
@@ -317,9 +329,19 @@ Returns JSON to stdout on completion:
   "work_items_total": 5,
   "human_gates_resolved": 2,
   "validation_runs": 7,
-  "mode": "DONE"
+  "mode": "DONE",
+  "recommended_next": "create_pr",
+  "issues": []
 }
 ```
+
+`recommended_next` — the single highest-priority follow-up action:
+- `"run_validation"` — WIs with missing or partial validation evidence
+- `"create_pr"` — feature branch with unmerged commits and no open PR
+- `"check_ci"` — PR exists but CI status unknown
+- `null` — everything clean, no action needed
+
+`issues` — array of strings describing validation gaps or warnings. Empty when clean.
 
 ## Error Handling
 
