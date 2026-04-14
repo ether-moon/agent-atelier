@@ -15,6 +15,7 @@ When initializing state files, use these exact defaults. Timestamps should be UT
   "active_candidate": null,
   "candidate_activated_at": null,
   "candidate_queue": [],
+  "team_name": null,
   "next_action": {
     "owner": "orchestrator",
     "type": "draft_first_work_item",

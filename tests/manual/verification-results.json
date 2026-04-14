@@ -1,0 +1,69 @@
+{
+  "verified_at": "2026-04-14T03:18:00Z",
+  "claude_code_version": "2.1.105",
+  "verification_session_branch": "subagent-sonnet-model",
+  "agent_teams_flag": "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1",
+  "results": [
+    {
+      "test": "spawn_time_mode",
+      "hypothesis": "Agent tool's mode parameter is honored at spawn time",
+      "deviation_from_protocol": "Used subagent_type=builder instead of state-manager because state-manager's tool list does not include Write — mode=acceptEdits applies to edit tools (Write/Edit/NotebookEdit), so the test requires an agent that actually has those tools.",
+      "spawn_params": {
+        "name": "test-acceptEdits",
+        "subagent_type": "builder",
+        "mode": "acceptEdits"
+      },
+      "mode_requested": "acceptEdits",
+      "write_succeeded_without_approval": true,
+      "evidence": "Teammate reported 'Write tool executed immediately with no permission prompt. Created /tmp/mode-test.txt with content hello on first call with no interruption, denial, or approval gate.' File existence confirmed by host.",
+      "conclusion": "mode parameter IS honored at spawn time. Spawning a teammate with mode='acceptEdits' makes Write/Edit tools auto-approve without prompts."
+    },
+    {
+      "test": "plan_approval_protocol",
+      "hypothesis": "When spawn prompt requires plan approval, teammate sends a structured plan_approval_request message",
+      "spawn_params": {
+        "name": "test-planner",
+        "subagent_type": "builder",
+        "mode": "default (not specified)",
+        "prompt_includes_plan_approval_requirement": true
+      },
+      "message_type_received": "plain_text",
+      "evidence": "Teammate sent plain markdown text titled 'Plan approval request:' rather than a structured plan_approval_request JSON. The teammate did not call ExitPlanMode — it just composed a text message and asked for approval.",
+      "respected_approval_gate": true,
+      "created_file_before_approval": false,
+      "approval_method_that_worked": "plain text 'Approved. Proceed.' SendMessage reply",
+      "conclusion": "When plan approval is requested only via spawn prompt instructions (without mode='plan'), the teammate respects the gate but uses PLAIN TEXT rather than a structured plan_approval_request. The structured protocol requires ExitPlanMode, which is only triggered automatically when the teammate is actually in plan mode (see Test 3)."
+    },
+    {
+      "test": "plan_mode_spawn",
+      "hypothesis": "mode='plan' makes teammate start in read-only plan mode and follow ExitPlanMode → plan_approval_request flow",
+      "spawn_params": {
+        "name": "test-plan-mode",
+        "subagent_type": "builder",
+        "mode": "plan"
+      },
+      "started_in_plan_mode": true,
+      "started_in_plan_mode_evidence": "Harness injected a system-reminder stating 'Plan mode is active' with a designated plan file path (/Users/ether/.claude/plans/precious-riding-castle.md) and restricted edits to that file only.",
+      "write_blocked_before_approval": true,
+      "write_blocked_evidence": "Plan-mode system reminder explicitly forbade non-readonly tools. Only the designated plan file at the harness path was writable during plan mode.",
+      "used_exit_plan_mode": true,
+      "sent_plan_approval_request": true,
+      "plan_approval_request_evidence": "Received structured JSON with type='plan_approval_request', from='test-plan-mode', planFilePath, planContent, and requestId='plan_approval-1776136680699@test-plan-mode@api-test'. Triggered by the teammate's ExitPlanMode call.",
+      "approval_method_that_worked": "Structured plan_approval_response message via SendMessage with matching request_id and approve=true",
+      "post_approval_mode": "bypassPermissions (auto-transition)",
+      "post_approval_evidence": "Teammate reported: 'After your approval arrived, permissionMode was bypassPermissions (per the approval response metadata). Write to /tmp/plan-mode-test.txt succeeded immediately on first try.' Host confirmed file exists with content 'test'.",
+      "conclusion": "mode='plan' fully wires the structured plan-approval flow: teammate starts in plan mode, Write/Edit blocked by harness, ExitPlanMode triggers a structured plan_approval_request to the lead, plan_approval_response with approve=true unblocks the teammate AND auto-transitions its permission mode to bypassPermissions for the post-approval execution."
+    }
+  ],
+  "additional_findings": [
+    "Plan approval flow REQUIRES mode='plan' to get the structured protocol. Spawn-prompt-only plan-approval instructions produce plain text plans (Test 2), while mode='plan' produces structured plan_approval_request messages (Test 3).",
+    "ExitPlanMode is the harness mechanism that converts a teammate's plan into a structured plan_approval_request — it does not unilaterally exit plan mode; it submits the plan and holds the teammate in a waiting state until the lead responds.",
+    "After plan_approval_response with approve=true, the teammate's permission mode auto-transitions to bypassPermissions for the post-approval execution phase. Subsequent Write/Edit calls succeed immediately without further prompts.",
+    "state-manager subagent does NOT have Write in its tools list — any test that requires Write must use builder or another agent type with edit tools."
+  ],
+  "implications_for_agent_atelier": [
+    "The Architect/Orchestrator should rely on mode='plan' (not just prompt instructions) when spawning Builders for complex work items, to get the structured plan_approval_request flow that the orchestrator can detect programmatically.",
+    "The current Plan Review Protocol in plugins/agent-atelier/references/prompts/orchestrator.md should distinguish between 'plain text plan messages' (informal review) and 'plan_approval_request structured messages' (structured review with request_id tracking).",
+    "Setting mode='acceptEdits' at spawn time is a reliable way to give Builders auto-approve permissions without triggering interactive prompts — useful for trusted automation paths."
+  ]
+}

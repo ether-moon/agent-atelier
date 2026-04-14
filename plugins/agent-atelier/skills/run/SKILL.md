@@ -22,7 +22,7 @@ This skill starts the full autonomous development loop. It spawns the agent team
 
 ## Allowed Tools
 
-- Read, Write, Bash, Glob, Agent (for team spawning), CronCreate, CronDelete
+- Read, Write, Bash, Glob, Agent (for team spawning), CronCreate, CronDelete, CronList
 
 ## Phase 1: Pre-Flight Check
 
@@ -37,33 +37,61 @@ Use Agent Teams to create one flat team for the development loop.
 
 ### Core Team (Always-On — 4 Roles)
 
-Read the role prompts from `references/prompts/` and spawn teammates:
+Create the team and spawn teammates using subagent definitions from `.claude/agents/`:
 
+```text
+TeamCreate(team_name="agent-atelier-dev", description="Autonomous product development loop")
 ```
-spawnTeam("agent-atelier-dev")
-```
 
-Then spawn each core teammate with their prompt:
+After team creation, persist the team name to loop-state via `state-commit` directly (State Manager is not yet spawned): set `team_name` to `"agent-atelier-dev"`. This allows hooks and cleanup verification to locate team resources without hardcoding.
 
-| Role | Prompt Source | Mode |
-|------|-------------|------|
-| State Manager | `references/prompts/state-manager.md` | `acceptEdits` |
-| PM | `references/prompts/pm.md` | `acceptEdits` |
-| Architect | `references/prompts/architect.md` | `acceptEdits` |
+Then spawn each core teammate by referencing their agent type:
 
-The **Orchestrator** role is played by the lead agent (you) — do not spawn a separate teammate for it. Read `references/prompts/orchestrator.md` as your own operating guide.
+| Role | Agent Type | Mode | Model | Key Tool Differences |
+|------|-----------|------|-------|---------------------|
+| State Manager | `state-manager` | `acceptEdits` | `sonnet` | Bash (for state-commit) but no Write/Edit |
+| PM | `pm` | `acceptEdits` | `opus` | Write/Edit (for docs) but no Bash |
+| Architect | `architect` | `acceptEdits` | `opus` | Write/Edit (for docs) but no Bash |
+
+Spawn with: `"Spawn a teammate using the state-manager agent type"` (etc. for each role). The agent definition's `model` and `tools` fields are applied automatically. The role prompt body from `references/prompts/` is appended as additional instructions.
+
+The **Orchestrator** role is played by the lead agent (you) — do not spawn a separate teammate for it. Read `references/prompts/orchestrator.md` as your own operating guide. Orchestrator, PM, and Architect use Opus (judgment-heavy roles); all other teammates use Sonnet (execution-focused roles).
 
 ### Conditional Specialists (Spawned On-Demand)
 
-| Role | When to Spawn | Prompt Source | When to Shutdown |
-|------|--------------|-------------|------------------|
-| Builder(s) | WI enters `ready` and BUILD_PLAN/IMPLEMENT phase | `references/prompts/builder.md` | After WI completion or requeue |
-| VRM | Candidate enters `active_candidate` | `references/prompts/vrm.md` | After evidence bundle produced |
-| QA Reviewer | REVIEW_SYNTHESIS phase begins | `references/prompts/qa-reviewer.md` | After findings submitted |
-| UX Reviewer | REVIEW_SYNTHESIS phase begins | `references/prompts/ux-reviewer.md` | After findings submitted |
+| Role | Agent Type | When to Spawn | When to Shutdown | Model |
+|------|-----------|--------------|------------------|-------|
+| Builder(s) | `builder` | WI enters `ready` and BUILD_PLAN/IMPLEMENT phase | After WI completion or requeue | `sonnet` |
+| VRM | `vrm` | Candidate enters `active_candidate` | After evidence bundle produced | `sonnet` |
+| QA Reviewer | `qa-reviewer` | REVIEW_SYNTHESIS phase begins | After findings submitted | `sonnet` |
+| UX Reviewer | `ux-reviewer` | REVIEW_SYNTHESIS phase begins | After findings submitted | `sonnet` |
 
-Spawn conditional roles with `Agent(team_name="agent-atelier-dev", run_in_background=true)`.
-Shut down via `requestShutdown` when their phase ends.
+Spawn conditional roles by referencing agent type: `"Spawn a teammate using the builder agent type to implement WI-014"`.
+Shut down via `SendMessage({type: "shutdown_request"})` when their phase ends.
+
+> **Note:** `skills` and `mcpServers` frontmatter in subagent definitions are NOT applied when running as a teammate (known limitation). Teammates load skills and MCP servers from project settings. The `tools` allowlist and role prompt body ARE applied.
+
+### Builder Spawn Policy
+
+When spawning a Builder for a work item, check the WI's `complexity` field in `work-items.json`:
+
+- **`simple`** (default): Spawn with `mode: "acceptEdits"`. Builder implements immediately.
+- **`complex`**: Spawn with `mode: "plan"`. The Builder starts in read-only plan mode — Write/Edit tools are blocked by the harness. The Builder proposes a plan, calls `ExitPlanMode`, which sends a structured `plan_approval_request` to the Orchestrator. After `plan_approval_response(approve: true)`, the Builder's permission mode auto-transitions to `bypassPermissions` for implementation.
+
+For complex WIs: `"Spawn a teammate using the builder agent type to implement WI-014"` with `mode: "plan"`. The plan approval flow is mechanical — no prompt instruction needed. See the Orchestrator's Plan Review Protocol for approval criteria.
+
+> **Why `mode: "plan"` and not prompt instructions?** Empirically verified: prompt-only plan approval produces plain text plans without structured messaging. Only `mode: "plan"` triggers the `ExitPlanMode` → `plan_approval_request` → `plan_approval_response` protocol that the Orchestrator can process programmatically.
+
+### TeammateIdle Auto-Assignment
+
+The `TeammateIdle` hook (`on-teammate-idle.sh`) automatically detects when a teammate is about to go idle and feeds back the next assignable work item. This eliminates the ~2 minute polling delay for work assignment:
+
+- **Builders:** Directed to the next `ready` WI via `/agent-atelier:execute claim`
+- **VRM:** Directed to the active candidate for validation
+- **Reviewers:** Directed to WIs in `reviewing` status during REVIEW_SYNTHESIS
+- **Core team (SM, PM, Architect):** Kept alive while orchestration is active in their relevant phases
+
+If no work is available for the teammate's role, the hook allows idle (exit 0) and the teammate shuts down gracefully.
 
 ### Team Roster Injection
 
@@ -80,7 +108,7 @@ Your teammates in this session:
 Send messages to teammates using their exact name above. Do not guess names.
 ```
 
-When conditional specialists are spawned (Builder, VRM, reviewers), include the current full roster in their prompt AND broadcast the new teammate's name and role to all existing teammates via `write()`.
+When conditional specialists are spawned (Builder, VRM, reviewers), include the current full roster in their prompt AND broadcast the new teammate's name and role to all existing teammates via `SendMessage`.
 
 ### Monitor Infrastructure
 
@@ -202,9 +230,31 @@ Review findings are persisted to disk so they survive cold resume and session cr
 On cold resume, the Orchestrator reads this file to restore review state. If a WI is in `reviewing` status but no `findings.json` exists, the review must be re-initiated from the REVIEW_SYNTHESIS phase.
 
 ### DONE
-- All WIs complete with evidence. Report results to user.
-- **Monitor cleanup:** Stop all monitors via `/agent-atelier:monitors stop all`. Cancel the CronCreate poll job via `CronDelete` with the stored job ID.
-- `cleanup` the team resources.
+All WIs complete with evidence. Execute the team cleanup checklist in order:
+
+1. **Verify completion:** Confirm all WIs have status `done` and `active_candidate` is null.
+2. **Stop monitors:** Stop all monitors via `/agent-atelier:monitors stop all`.
+3. **Cancel poll job:** `CronDelete` with the stored job ID.
+4. **Shutdown teammates:** Send `SendMessage({type: "shutdown_request"})` to each active teammate. Wait for all to reach idle/stopped state.
+5. **Clean up team:** Call `TeamDelete` to remove team resources. **Only the lead (Orchestrator) may run cleanup** — teammates running cleanup can leave resources inconsistent.
+6. **Report results:** Present final status dashboard to user.
+
+### Cleanup Verification
+
+After executing the 6-step checklist, verify each step actually succeeded before reporting to the user:
+
+**Primary success conditions** (all must pass):
+1. Re-read `work-items.json` — confirm zero non-`done` items and `active_candidate` is null.
+2. Call `CronList` — confirm no remaining orchestration poll jobs. If any exist, `CronDelete` them.
+3. Team cleanup completed successfully — the lead executed cleanup and no active teammates remain.
+
+**Secondary confirmation** (informational, not blocking):
+4. Check whether `~/.claude/teams/<team_name>/` still exists on disk. Directory absence confirms cleanup, but presence alone is not a failure — the canonical signal is step 3 (successful cleanup execution). Log a warning if the directory persists after successful cleanup.
+
+**On failure:**
+5. If primary conditions 1–3 fail, retry the shutdown/cleanup sequence once. If still failing, report discrepancies to the user with manual remediation commands.
+
+**Do NOT report "loop completed" until all primary verification checks pass.**
 
 ## Phase 4: Continuous Monitoring
 
@@ -217,7 +267,7 @@ The poll job created in Phase 2 fires when the REPL is idle. On each tick:
 1. Invoke `/agent-atelier:monitors check` with the stored task ID mapping.
 2. **IMMEDIATE events** — act within this polling cycle:
    - `heartbeat_warning` (expired) → trigger `/agent-atelier:watchdog tick`
-   - `heartbeat_warning` (warning) → message Builder via `write()` to send `execute heartbeat`
+   - `heartbeat_warning` (warning) → message Builder via `SendMessage` to send `execute heartbeat`
    - `gate_resolved` → re-read gate state, resume blocked WIs
    - `gate_opened` → present HDR to user immediately
    - `ci_status` (success) → proceed with VALIDATE → REVIEW_SYNTHESIS transition

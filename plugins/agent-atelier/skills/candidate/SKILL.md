@@ -24,7 +24,7 @@ Candidates are the bridge between implementation and validation. When a builder 
 
 ## Allowed Tools
 
-- Read (state files), Bash (git root, state-commit), Glob
+- Read (state files), Bash (git root, state-commit), Glob, TaskList, TaskUpdate
 
 ## Write Protocol
 
@@ -114,6 +114,7 @@ Clears the active candidate after validation completes or after demotion due to 
    - Verify WI status is `done`
    - **loop-state.json:** `active_candidate` → null, `candidate_activated_at` → null. Bump `revision`, set `updated_at`.
    - Commit loop-state only.
+   - *Native task sync note:* No update needed — `execute complete` already synced the native task to `completed`.
 
    **`demoted`** (default) — Validation failed or was abandoned. The WI returns to the pool for rework.
    - **Idempotency guard:** If the WI is already in `ready` status with `promotion.status` == `demoted` (i.e., `validate record` already handled the demotion), skip the work-items.json write — only clear the loop-state slot. This prevents a double-write when validate and candidate clear operate on the same failed validation.
@@ -126,6 +127,7 @@ Clears the active candidate after validation completes or after demotion due to 
        - Bump item `revision`
      - **loop-state.json:** `active_candidate` → null, `candidate_activated_at` → null. Bump `revision`, set `updated_at`.
      - Commit both files in one transaction.
+     - **Sync native task.** Look up the native task for the WI (search `TaskList` for subject starting with the WI's ID prefix). If found, call `TaskUpdate` with `status: "pending"`. The WI is returning to the pool.
    - **If WI already demoted:**
      - **loop-state.json:** `active_candidate` → null, `candidate_activated_at` → null. Bump `revision`, set `updated_at`.
      - Commit loop-state only.

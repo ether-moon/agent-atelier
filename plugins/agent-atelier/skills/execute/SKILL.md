@@ -23,7 +23,7 @@ argument-hint: "claim <id> | heartbeat <id> | requeue <id> | complete <id> | att
 
 ## Allowed Tools
 
-- Read (state files, evidence), Bash (git root, state-commit), Glob
+- Read (state files, evidence), Bash (git root, state-commit), Glob, TaskList, TaskUpdate
 
 ## Write Protocol
 
@@ -58,6 +58,7 @@ Claims a work item for implementation, establishing a lease.
    - `handoff_count` → increment by 1 (tracks how many times this WI has been claimed)
    - `revision` → increment by 1
 4. Bump store revision and commit via state-commit with `expected_revision` set to the store revision observed in step 1.
+5. **Sync native task.** Look up the native task for this WI (see Native Task Lookup below). If found, call `TaskUpdate` with `status: "in_progress"`.
 
 **Arguments:**
 - `<WI-ID>` — required
@@ -95,6 +96,7 @@ Returns a work item to the queue when the executor cannot continue. This might h
    - If `--reason`: set `last_requeue_reason`
    - `revision` → increment by 1
 4. Bump store revision and write.
+5. **Sync native task.** Look up the native task for this WI (see Native Task Lookup below). If found, call `TaskUpdate` with `status: "pending"`.
 
 **Common Use Cases:**
 - **Implementation requeue** — Builder hit a dead end during `implementing`. Standard requeue to `ready`.
@@ -128,6 +130,7 @@ Marks a work item as done. This is a high-bar operation — it requires evidence
    - `completion` → the completion record above
    - `revision` → increment by 1
 6. Bump store revision and write.
+7. **Sync native task.** Look up the native task for this WI (see Native Task Lookup below). If found, call `TaskUpdate` with `status: "completed"`.
 
 **Arguments:**
 - `--validation-manifest <path>` — required
@@ -157,6 +160,19 @@ Records an implementation attempt — useful for tracking what was tried, what f
 All timestamps are UTC ISO-8601 with `Z` suffix: `2026-04-08T12:00:00Z`
 
 To calculate lease expiry: current time + lease minutes. Truncate microseconds.
+
+## Native Task Lookup
+
+All native task sync operations use the same lookup pattern:
+
+1. Call `TaskList` to get all tasks.
+2. Collect all tasks whose subject starts with `"WI-NNN:"` (matching the target WI's ID prefix).
+3. Apply the deduplication rule:
+   - **0 matches:** Log a warning to stderr and skip sync.
+   - **1 match:** Use it as the canonical native task.
+   - **2+ matches:** Log a warning to stderr listing duplicates. Use the task with the highest ID (newest) as canonical.
+
+**Native task sync is best-effort.** Failures do not affect the WI state-commit outcome. `work-items.json` is the authoritative source of truth; native tasks are a visibility and dependency-resolution layer.
 
 ## Exit Codes
 

@@ -19,7 +19,7 @@ argument-hint: "list | show <id> | upsert <json-or-fields>"
 
 ## Allowed Tools
 
-- Read (state files), Bash (git root, state-commit), Glob
+- Read (state files), Bash (git root, state-commit), Glob, TaskCreate, TaskList, TaskUpdate
 
 ## Input
 
@@ -70,7 +70,7 @@ This is the only subcommand that writes. Follow these steps carefully because th
 3. **Merge and normalize.** Apply the merge logic from `references/wi-schema.md`:
    - If item exists: defaults → existing → new payload
    - If item is new: defaults → new payload
-   - Apply all normalization rules (array fields, promotion object, lease clearing, gate clearing, revision bump)
+   - Apply all normalization rules (array fields, promotion object, lease clearing, gate clearing, revision bump, depends_on immutability, complexity)
 
 4. **Bump store revision.** Increment the store's `revision` by 1 and set `updated_at` to now.
 
@@ -82,6 +82,30 @@ This is the only subcommand that writes. Follow these steps carefully because th
    ```
 
 6. **Check the result.** If `committed: true`, report success. If `committed: false` with `reason: stale_revision`, re-read the store and retry.
+
+### Native Task Sync (after successful upsert)
+
+After a successful state-commit, sync the work item to the native Agent Teams task list. This creates a visibility layer with automatic dependency resolution. **Sync failures are non-fatal** — log a warning to stderr but do not fail the upsert. `work-items.json` is always the source of truth.
+
+7. **Find the canonical native task.** Call `TaskList` and collect all tasks whose subject starts with `"WI-NNN:"` (matching the target WI's ID prefix). Apply the deduplication rule:
+   - **0 matches:** No native task exists yet — proceed to step 8 (create) and steps 9–10 (wire dependencies).
+   - **1 match:** This is the canonical native task — skip to end (no dependency rewiring needed).
+   - **2+ matches:** Log a warning to stderr listing all duplicate task IDs. Use the task with the highest ID as the canonical one (newest). Ignore the others. This can happen after response loss during TaskCreate, partial retry, or manual cleanup failure. Skip to end.
+
+8. **Create if new.** Only if step 7 found 0 matches (this is a new WI), call `TaskCreate` with:
+   - `subject`: `"WI-NNN: <title>"`
+   - `description`: The WI's `title` and `why_now` fields, plus `"Tracked in .agent-atelier/work-items.json. Use /agent-atelier:status for detailed state."`
+   - `metadata`: `{"work_item_id": "WI-NNN"}`
+
+9. **Wire forward dependencies (create only).** Only after step 8 (new task creation). If `depends_on` is non-empty, for each dependency WI ID:
+   - Search `TaskList` for a task whose subject starts with the dependency WI's ID prefix
+   - Collect the found native task IDs
+   - Call `TaskUpdate` on the current WI's native task with `addBlockedBy` set to the collected IDs
+   - Skip any dependencies whose native tasks do not exist yet (they will be wired in step 10 when created)
+
+10. **Wire reverse dependencies (create only).** Only after step 8. Search `TaskList` for any tasks whose corresponding WIs (in `work-items.json`) have `depends_on` containing the current WI's ID. For each found, call `TaskUpdate` on that task with `addBlockedBy` pointing to the current WI's native task. This handles the case where a depending WI was created before its dependency.
+
+   **Why create-only:** Dependency wiring runs once at task creation. The `depends_on` field is immutable after first upsert (see normalization rule 8 in `wi-schema.md`), so re-wiring on subsequent updates would be redundant. Since the Agent Teams API only supports `addBlockedBy` (no removal), re-applying would at best be a no-op and at worst mask drift.
 
 ## Write Protocol
 
