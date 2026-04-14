@@ -122,6 +122,23 @@ After spawning the team, start background monitors for continuous state observat
 
 The monitors provide early warning (10–60 second detection) while the watchdog provides mechanical recovery (15-minute ticks). Both layers operate concurrently.
 
+### Active Worktree Hygiene
+
+During an active loop, `.agent-atelier/**` is live runtime state. Do not treat it like ordinary dirty git state.
+
+- Never use `git checkout`, `git restore`, `git stash`, or `git clean` on `.agent-atelier/**`
+- Never stash or revert teammate-owned WIP just to make your own commit easier
+- If you need a narrow commit, stage only the files you own with explicit pathspecs
+- If runtime state appears corrupted, recover through State Manager, watchdog, or the recovery protocol — not git cleanup commands
+
+For incident reporting during the loop, separate:
+
+- **Confirmed facts** — direct observations from logs, state, or command output
+- **Hypotheses** — likely causes that still need confirmation
+- **Next actions** — the immediate safe step you will take
+
+This keeps recovery decisions grounded and reduces accidental state destruction during fast triage.
+
 ## Phase 3: State Machine Loop
 
 Drive the development loop through these phases. The current phase is stored in `loop-state.json.mode`.
