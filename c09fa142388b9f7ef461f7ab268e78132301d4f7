@@ -1,0 +1,28 @@
+Decisions Made
+- Rebasing the branch onto `origin/main` was handled before the version bump so the branch now carries only the patch release commit on top of current main.
+- The plugin version was increased from `0.1.2` to `0.1.3` in `plugins/agent-atelier/.claude-plugin/plugin.json`.
+- `CHANGELOG.md` received a new `0.1.3` entry summarizing the phantom-claim fix and runtime-state guardrails that are now on main.
+
+Problems Encountered
+- The feature and docs commits that previously lived on this branch were already upstream on `origin/main`, so a normal rebase would have carried redundant history.
+- `CHANGELOG.md` lagged the plugin version and did not yet describe the current patch-level changes.
+
+Constraints Identified
+- The repository requires a memento note on every git commit under `refs/notes/commits`.
+- Manual file edits had to be limited to version metadata and changelog updates for this request.
+- The branch had to be aligned with `origin/main` before publishing the release bump.
+
+Open Questions
+- None.
+
+Context
+- `origin/main` already includes the TeammateIdle phantom-claim fix and runtime-state incident guardrails.
+- This task was limited to rebasing onto `origin/main` and publishing the next patch release metadata.
+- Verification was performed with `bash tests/all.sh` after the version metadata changes.
+
+Recorded Decisions
+- Release `0.1.3` is represented by commit `c09fa14`.
+- The branch should be pushed with history rewrite safety (`--force-with-lease`) because it was rebased before the version bump.
+
+Vault Entries Referenced
+- None.
