@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.3] - 2026-04-14
+
+### Improved
+
+- **orchestrator/run**: document live runtime-state hygiene for `.agent-atelier/**` and require incident triage to separate facts, hypotheses, and next actions
+- **execute**: clarify `claim` as Orchestrator-authorized and State-Manager-executed to reinforce the single-writer coordination path
+
+### Fixed
+
+- **TeammateIdle**: keep Builders idle until the Orchestrator explicitly dispatches work, preventing phantom self-claims and unresponsive feedback loops
+- **VRM**: wake validation work only when an `active_candidate` exists, avoiding repeated idle-loop feedback with no actionable task
+
 ## [0.1.1] - 2026-04-13
 
 ### Added
