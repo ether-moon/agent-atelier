@@ -1,0 +1,22 @@
+## Decisions Made
+- 완료 보고를 메뉴판(4개 옵션 나열)에서 단일 추천 방식으로 변경: 사용자가 선택 피로 없이 가장 논리적인 다음 단계를 바로 실행할 수 있도록
+- 요약에서 WI 수/커밋 SHA 등 메타데이터 제거, 사용자 관점의 성과 한 줄 요약으로 대체: 사용자가 궁금한 건 bookkeeping이 아니라 뭘 만들었는지
+- Output Contract에서 suggested_next_actions 배열을 recommended_next 단일값으로 단순화
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+이전 커밋(281850c)에서 DONE 보고 기능을 추가했으나 사용자가 더 효율적이고 도움되는 방식을 요청. 메뉴판 나열을 우선순위 기반 단일 추천으로 리팩터링하고, 완료 요약을 사용자 관점 성과 중심으로 개선.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
