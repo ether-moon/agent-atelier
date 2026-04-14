@@ -1,0 +1,24 @@
+Decisions Made
+- Added a backfilled `0.1.2` section to `CHANGELOG.md` based on the actual commit range between the `0.1.1` and `0.1.2` version bumps.
+- Grouped the historical changes under Added, Improved, and Fixed to match the existing changelog structure.
+
+Problems Encountered
+- `0.1.2` had no explicit changelog entry even though the release included a large Agent Teams API alignment commit.
+- The historical release boundary had to be reconstructed from commit history rather than an existing tag-specific note.
+
+Constraints Identified
+- The request was limited to changelog supplementation; no functional code changes were needed.
+- The repository requires a memento note on every git commit under `refs/notes/commits`.
+
+Open Questions
+- None.
+
+Context
+- The relevant historical range was `426f7f5..57d56ea`, with `4dac130` providing the substantive `0.1.2` feature set.
+- The current branch already carries the `0.1.3` version bump PR.
+
+Recorded Decisions
+- `0.1.2` now documents Agent Teams subagent definitions, new lifecycle hooks, native task / plan approval alignment, and the associated hook/doc fixes.
+
+Vault Entries Referenced
+- None.
