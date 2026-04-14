@@ -1,0 +1,21 @@
+## Decisions Made
+- None
+
+## Problems Encountered
+- Rebase conflicts in run/SKILL.md, architect.md, on-stop.sh, on-teammate-idle.sh, orchestrator.md, verification.md: All were trivial overlaps between the incremental branch commits and the big API alignment commit. Resolved by keeping HEAD (rebased) side which had all fixes.
+- Last commit (CodeRabbit review fixes) auto-dropped by rebase: Its changes were already incorporated in the resolved conflicts, so git detected it as "patch contents already upstream."
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Rebased the subagent-sonnet-model branch (5 commits) onto origin/main, resolving merge conflicts across 5 files. Bumped plugin version from 0.1.1 to 0.1.2 for the patch release. Preparing to push directly to origin/main.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
