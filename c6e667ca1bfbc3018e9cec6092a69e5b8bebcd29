@@ -1,0 +1,21 @@
+## Decisions Made
+- Address all actionable and nitpick CodeRabbit comments in a single commit: Batching keeps the fix atomic and avoids multiple CI triggers for minor changes
+- Skip the AGENTS.md per-agent documentation suggestion: It is a follow-up improvement, not a bug fix — out of scope for this PR blocker resolution pass
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- Project requires memento-commit skill for all commits: Direct git commit is blocked by a PreToolUse hook that enforces the knowledge-distillery pipeline
+
+## Open Questions
+- None
+
+## Context
+Scanned PR #4 (subagent-sonnet-model -> main) for blockers. No merge conflicts or CI failures found. Two CodeRabbit review passes existed: the first was already addressed in commit 5b9b4f9, the second had one actionable comment (extract work_item_id from active_candidate dict) and four nitpick comments (nullglob, code fence language specifiers, prose redundancy). All were fixed and tests pass (56/56).
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
