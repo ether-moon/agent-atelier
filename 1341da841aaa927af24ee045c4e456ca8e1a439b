@@ -1,0 +1,29 @@
+## Decisions Made
+- Subject prefix matching for native task lookup: TaskList/TaskGet do not return metadata, so WI-NNN prefix in task subject is the viable convention. Empirically verified in separate Agent Teams session.
+- mode:"plan" required for structured plan approval: Prompt-only instructions produce plain text plans without ExitPlanMode. Only mode:"plan" triggers the plan_approval_request/response protocol. Confirmed by live test.
+- mode:"acceptEdits" at spawn time for simple WIs: Empirically verified that mode parameter is honored at spawn, despite docs suggesting otherwise.
+- Bash heredoc syntax fix: Removed trailing ) from $(python3 ... <<'PY' ... || echo "") lines in hooks — the ) prematurely closes command substitution.
+- write() replaced with SendMessage across all plugin files: write() is not an Agent Teams API — SendMessage is the canonical tool.
+- Team cleanup verification added to DONE phase: Re-read work-items.json, CronList check, directory absence confirmation before reporting completion.
+
+## Problems Encountered
+- metadata write-only: TaskCreate accepts metadata but TaskList/TaskGet/TaskCreated hook stdin do not return it. Required switching 5 files from metadata-based to subject-prefix-based lookup.
+- Bash heredoc parse error in hooks: $(python3 ... <<'PY' ... || echo "") with ) on the opening line caused syntax error. Reproduced with minimal test, fixed by restructuring.
+- Peer review false positives: Two reviewer findings were incorrect (skill availability in teammates, Stop hook comment). Dismissed after verification.
+
+## Constraints Identified
+- skills/mcpServers frontmatter ignored for teammates: Known limitation (Issue #30703). Hooks are project-level only.
+- metadata is informational-only on TaskCreate: Cannot be used for lookup. Subject prefix is the only viable convention.
+- Plan approval structured protocol requires mode:"plan": Cannot be achieved through prompt instructions alone.
+
+## Open Questions
+- 10 write() references remain in docs/design/ (historical design documents) — unclear if they should be updated or left as-is.
+
+## Context
+Peer-reviewed the agent-atelier plugin against official Agent Teams API documentation using 3 independent LLM reviewers. Classified findings as OBVIOUS/AMBIGUOUS, auto-fixed obvious issues (API name corrections, heredoc syntax), then ran empirical verification for ambiguous items (metadata availability, mode parameter, plan approval protocol). Applied fixes based on live test results across 28 files. Added subagent definitions, lifecycle hooks, native task integration, and plan approval infrastructure.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
