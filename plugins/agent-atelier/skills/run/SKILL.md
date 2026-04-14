@@ -237,11 +237,18 @@ All WIs complete with evidence. Execute the team cleanup checklist in order:
 3. **Cancel poll job:** `CronDelete` with the stored job ID.
 4. **Shutdown teammates:** Send `SendMessage({type: "shutdown_request"})` to each active teammate. Wait for all to reach idle/stopped state.
 5. **Clean up team:** Call `TeamDelete` to remove team resources. **Only the lead (Orchestrator) may run cleanup** — teammates running cleanup can leave resources inconsistent.
-6. **Report results:** Present final status dashboard to user.
+6. **Report results and suggest next actions:** Present the final status dashboard to the user. Include a summary of what was completed (WI count, key commits, branches touched) and a list of suggested follow-up actions based on the current state. Typical suggestions:
+   - **Create PR** — if commits exist on a feature branch that hasn't been merged
+   - **Run full validation** — if any WI skipped validation or used partial evidence
+   - **Review diffs** — link to `git diff main...HEAD --stat` output
+   - **Deploy / release** — if all validation passed and the branch is ready
+   - Omit suggestions that don't apply (e.g., don't suggest PR creation if already on main).
+   
+   The report must be a single, user-visible message — not a silent JSON blob. End with an explicit prompt: ask the user which follow-up action they'd like to take, or whether they're done.
 
 ### Cleanup Verification
 
-After executing the 6-step checklist, verify each step actually succeeded before reporting to the user:
+After executing the cleanup checklist, verify each step actually succeeded before reporting to the user:
 
 **Primary success conditions** (all must pass):
 1. Re-read `work-items.json` — confirm zero non-`done` items and `active_candidate` is null.
@@ -317,9 +324,19 @@ Returns JSON to stdout on completion:
   "work_items_total": 5,
   "human_gates_resolved": 2,
   "validation_runs": 7,
-  "mode": "DONE"
+  "mode": "DONE",
+  "suggested_next_actions": [
+    "create_pr",
+    "review_diffs"
+  ]
 }
 ```
+
+The `suggested_next_actions` array is populated based on the current state:
+- `"create_pr"` — feature branch has unpushed/unmerged commits
+- `"run_validation"` — WIs with incomplete or partial validation evidence
+- `"review_diffs"` — always included when there are code changes
+- `"deploy"` — all WIs passed validation, branch is merge-ready
 
 ## Error Handling
 
