@@ -1,0 +1,25 @@
+## Decisions Made
+- Builder idle hook always exits 0 (never exit 2): exit 2 feedback loops trap agents, making them unresponsive to team lead SendMessage commands. The Orchestrator receives idle notifications natively and dispatches work — the hook should not duplicate this.
+- VRM candidate_queue branch removed entirely: VRM cannot act without active_candidate; repeated "ask Orchestrator" messages are pure noise. Orchestrator activates candidates and messages VRM directly.
+- Claim routing through Orchestrator→SM only: Builders must never call /agent-atelier:execute claim or state-commit directly. This enforces the single-writer invariant at the prompt level since runtime RBAC is not available.
+
+## Problems Encountered
+- Phantom claims (WI-018, WI-020): TeammateIdle hook told idle Builders to call /agent-atelier:execute claim directly, bypassing SM. Builder-bug-a honestly reported following the hook instruction. Resolved by removing the claim instruction from hook output.
+- VRM idle loop (100+ notifications in 6 minutes): candidate_queue branch sent exit 2 feedback repeatedly when no active_candidate existed. VRM became unresponsive to shutdown_request. Resolved by removing the branch (exit 0 fallthrough).
+- Single-writer violations (rev 49→50, 61→62, 63→64 with request_id=null): Builders wrote state via state-commit directly, creating mystery revision bumps SM couldn't account for. Addressed by prompt-level prohibitions in builder.md and orchestrator.md.
+
+## Constraints Identified
+- No runtime RBAC in Claude Code Agent Teams: hooks receive tool name/input but not caller identity. Cannot distinguish SM from Builder at the script level — enforcement is prompt-level only.
+- Exit 2 (keep working) creates unbreakable loops: when the agent cannot make meaningful progress, exit 2 feedback causes idle→process→idle→process cycles where the agent cannot receive incoming messages.
+
+## Open Questions
+- Should a cooldown mechanism (timestamp file) be added to prevent any exit 2 feedback from looping, as a defense-in-depth measure for non-Builder roles?
+
+## Context
+Investigated and fixed phantom work item claims and VRM idle loops observed during Loop 2 orchestration. Root cause was the TeammateIdle hook (on-teammate-idle.sh) directing Builders to self-serve claims via /agent-atelier:execute, bypassing the Orchestrator→SM chain. Five files modified across hooks, prompts, and skill docs to establish Orchestrator-mediated claim routing.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
