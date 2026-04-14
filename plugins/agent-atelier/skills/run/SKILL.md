@@ -84,14 +84,16 @@ For complex WIs: `"Spawn a teammate using the builder agent type to implement WI
 
 ### TeammateIdle Auto-Assignment
 
-The `TeammateIdle` hook (`on-teammate-idle.sh`) automatically detects when a teammate is about to go idle and feeds back the next assignable work item. This eliminates the ~2 minute polling delay for work assignment:
+The `TeammateIdle` hook (`on-teammate-idle.sh`) automatically detects when a teammate is about to go idle and feeds back role-appropriate guidance. This eliminates the ~2 minute polling delay for work assignment:
 
-- **Builders:** Directed to the next `ready` WI via `/agent-atelier:execute claim`
+- **Builders:** Always allowed to go idle (exit 0). The Orchestrator receives the idle notification and dispatches work via `SendMessage`. Builders never receive exit 2 (keep working) feedback — this prevents unbreakable idle loops where the agent becomes unresponsive to team lead commands.
 - **VRM:** Directed to the active candidate for validation
 - **Reviewers:** Directed to WIs in `reviewing` status during REVIEW_SYNTHESIS
 - **Core team (SM, PM, Architect):** Kept alive while orchestration is active in their relevant phases
 
 If no work is available for the teammate's role, the hook allows idle (exit 0) and the teammate shuts down gracefully.
+
+**Builder claim flow:** Builder idle → Orchestrator receives idle notification → Orchestrator evaluates `work-items.json` for `ready` WIs → Orchestrator directs SM to call `/agent-atelier:execute claim` → SM writes state → Orchestrator dispatches Builder via `SendMessage`. This prevents both phantom claims (Builders self-serving) and idle loops (exit 2 feedback trapping agents).
 
 ### Team Roster Injection
 

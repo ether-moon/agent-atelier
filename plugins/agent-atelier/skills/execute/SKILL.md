@@ -45,6 +45,8 @@ Revision checking is always enforced — every transaction includes `expected_re
 
 Claims a work item for implementation, establishing a lease.
 
+**Caller authorization:** This subcommand must only be invoked by the Orchestrator when dispatching a Builder to a work item. Builders must NOT call `claim` directly — they message the Orchestrator when available, and the Orchestrator routes the claim. Self-served claims bypass the Orchestrator's coordination and create phantom state (multiple agents claiming without SM awareness). The TeammateIdle hook directs Builders to message the Orchestrator, not to call this subcommand.
+
 1. Read `.agent-atelier/work-items.json`.
 2. Find the work item. Verify:
    - Status is `ready`
