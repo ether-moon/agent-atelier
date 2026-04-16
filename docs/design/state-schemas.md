@@ -34,17 +34,19 @@
   "active_spec": "docs/product/behavior-spec.md",
   "active_spec_revision": 7,
   "open_gates": ["HDR-002"],
-  "active_candidate": {
-    "work_item_id": "WI-014",
+  "active_candidate_set": {
+    "id": "CS-003",
+    "work_item_ids": ["WI-014", "WI-015"],
     "branch": "candidate/WI-014",
-    "commit": "abc1234"
+    "commit": "abc1234",
+    "type": "batch",
+    "activated_at": "2026-04-08T14:10:00Z"
   },
-  "candidate_activated_at": "2026-04-08T14:10:00Z",
   "candidate_queue": [],
   "next_action": {
     "owner": "orchestrator",
     "type": "dispatch_vrm_evidence_run",
-    "target": "WI-014"
+    "target": "CS-003"
   }
 }
 ```
@@ -59,15 +61,14 @@
 | `active_spec` | string | Path to current behavior spec |
 | `active_spec_revision` | integer | Monotonic spec revision |
 | `open_gates` | string[] | Open HDR ids |
-| `active_candidate` | object or null | Exclusive validation slot |
-| `candidate_activated_at` | string or null | UTC timestamp set when a candidate enters the active slot; cleared on `candidate clear`. Used by watchdog for timeout detection. |
+| `active_candidate_set` | object or null | Exclusive validation slot |
 | `candidate_queue` | object[] | FIFO queue — `candidate activate` always pops the first entry |
 | `next_action` | object | Scheduler hint only; not authoritative by itself |
 
 ### Invariants
 
 - `revision` must increase by exactly 1 on every committed mutation
-- `active_candidate` may be null, but if non-null it must not also appear in `candidate_queue`
+- `active_candidate_set` may be null, but if non-null its `id` must not also appear in `candidate_queue`
 - every id in `open_gates` must exist under `.agent-atelier/human-gates/open/`
 
 ---
@@ -185,7 +186,7 @@
 |---|---|---|
 | `candidate_branch` | string or null | Branch name for the candidate |
 | `candidate_commit` | string or null | Commit hash for the candidate |
-| `status` | enum | `not_ready`, `queued`, `validating`, `demoted` |
+| `status` | enum | `not_ready`, `queued`, `validating` |
 
 ### Completion Sub-Object
 
@@ -306,7 +307,8 @@ Suggested path:
 ```json
 {
   "id": "RUN-2026-04-08-01",
-  "work_item_id": "WI-014",
+  "candidate_set_id": "CS-003",
+  "work_item_ids": ["WI-014", "WI-015"],
   "candidate_branch": "candidate/WI-014",
   "candidate_commit": "abc1234",
   "started_at": "2026-04-08T14:10:00Z",

@@ -95,11 +95,15 @@ For each work item with status `reviewing`:
 
 ### 3. Check for Stale Candidates
 
-If `active_candidate` exists in loop state:
-- Read `candidate_activated_at` from loop state — this records when the candidate entered the active slot.
-- If `candidate_activated_at` is missing or null, the state predates this field; use the work item's `last_heartbeat_at` as a fallback, or flag for manual review if neither timestamp exists.
+If `active_candidate_set` exists in loop state:
+- Read `active_candidate_set.activated_at` — this records when the candidate set entered the active slot.
+- If `activated_at` is missing or null, the state predates this field; fall back to the most recent `last_heartbeat_at` among referenced WIs, or flag for manual review if no timestamp exists.
 - Compare against `candidate_timeout_minutes` from watchdog defaults.
-- If stale: requeue the work item, clear `active_candidate` and `candidate_activated_at`, promote next item from `candidate_queue`.
+- If stale:
+  - for every WI in `active_candidate_set.work_item_ids`, set `status` → `ready`
+  - clear promotion metadata (`candidate_branch`, `candidate_commit`, `promotion.status` → `not_ready`)
+  - clear `active_candidate_set`
+  - promote the next candidate set from `candidate_queue` only if the queue is non-empty and the watchdog can do so mechanically without changing FIFO order
 
 ### 4. Check for Long-Open Gates
 
@@ -129,7 +133,7 @@ Budget alerts use the same alert structure as other watchdog alerts, with `type:
 
 Gather all changes from steps 2-6 and commit them in a single state-commit transaction. This may include:
 - Updated `work-items.json` (recovered items)
-- Updated `loop-state.json` (cleared active_candidate)
+- Updated `loop-state.json` (cleared or advanced `active_candidate_set`)
 - Updated `watchdog-jobs.json` (last_tick_at, open_alerts, revision bump)
 
 All changes go in one transaction with `expected_revision` set for each file. If a revision is stale (another writer changed state between read and commit), the entire tick is rejected — re-read and retry.

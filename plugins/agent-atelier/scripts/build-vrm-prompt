@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-build-vrm-prompt — Assembles VRM evidence input from work item and spec data.
+build-vrm-prompt — Assembles VRM evidence input from work items and spec data.
 
 Enforces the validation information barrier: the output contains ONLY data
-derived from the work item, behavior spec, and verification commands. Builder
+derived from the work items, behavior spec, and verification commands. Builder
 summaries, diffs, logs, and implementation explanations are excluded.
 
 Usage:
-  build-vrm-prompt --wi-id WI-014 [--root <path>]
+  build-vrm-prompt [--root <path>]
 
 Reads:
-  - .agent-atelier/work-items.json (the target work item)
-  - .agent-atelier/loop-state.json (active_candidate for branch/commit)
+  - .agent-atelier/work-items.json (the target work items)
+  - .agent-atelier/loop-state.json (active_candidate_set for branch/commit/WI list)
+
+Collects verify commands from ALL work items in the active candidate set
+and produces a single evidence bundle.
 
 Outputs:
   JSON matching plugins/agent-atelier/schema/vrm-evidence-input.schema.json
@@ -46,7 +49,9 @@ def load_json(path):
 
 def main():
     parser = argparse.ArgumentParser(prog="build-vrm-prompt")
-    parser.add_argument("--wi-id", required=True, help="Work item ID (e.g., WI-014)")
+    parser.add_argument("--wi-id", default=None,
+                        help="Work item ID (legacy single-WI mode). "
+                             "If omitted, uses all WIs from active_candidate_set.")
     parser.add_argument("--root", default=None, help="Repository root")
     args = parser.parse_args()
 
@@ -68,65 +73,109 @@ def main():
     store = load_json(wi_path)
     loop_state = load_json(ls_path)
 
-    # ── Find the work item ────────────────────────────────────────────
-    wi = None
-    for item in store.get("items", []):
-        if item.get("id") == args.wi_id:
-            wi = item
-            break
+    # ── Resolve target WI IDs from active_candidate_set ───────────────
+    active_set = loop_state.get("active_candidate_set")
+    if not active_set:
+        print("No active_candidate_set in loop-state", file=sys.stderr)
+        return 2
 
-    if wi is None:
-        available = [i.get("id") for i in store.get("items", [])]
-        print(f"Work item {args.wi_id} not found. Available: {available}", file=sys.stderr)
+    if args.wi_id:
+        target_ids = [args.wi_id]
+    else:
+        target_ids = active_set.get("work_item_ids", [])
+
+    if not target_ids:
+        print("active_candidate_set has no work_item_ids", file=sys.stderr)
+        return 2
+
+    # ── Find all target work items ────────────────────────────────────
+    items_by_id = {item["id"]: item for item in store.get("items", [])}
+    target_wis = []
+    missing = []
+    for wi_id in target_ids:
+        wi = items_by_id.get(wi_id)
+        if wi is None:
+            missing.append(wi_id)
+        else:
+            target_wis.append(wi)
+
+    if missing:
+        available = list(items_by_id.keys())
+        print(f"Work items {missing} not found. Available: {available}", file=sys.stderr)
         return 3
 
     # ── Validate preconditions ────────────────────────────────────────
-    if wi.get("status") != "candidate_validating":
-        print(
-            f"Work item {args.wi_id} is in status '{wi.get('status')}', "
-            f"expected 'candidate_validating'",
-            file=sys.stderr,
-        )
-        return 2
+    for wi in target_wis:
+        if wi.get("status") != "candidate_validating":
+            print(
+                f"Work item {wi['id']} is in status '{wi.get('status')}', "
+                f"expected 'candidate_validating'",
+                file=sys.stderr,
+            )
+            return 2
 
-    active = loop_state.get("active_candidate")
-    if not active or active.get("work_item_id") != args.wi_id:
-        print(
-            f"Work item {args.wi_id} is not the active candidate",
-            file=sys.stderr,
-        )
-        return 2
+        if wi["id"] not in active_set.get("work_item_ids", []):
+            print(
+                f"Work item {wi['id']} is not in the active candidate set",
+                file=sys.stderr,
+            )
+            return 2
 
     # ── Assemble VRM evidence input ───────────────────────────────────
-    # Only use data from the work item and spec — no builder context.
-    promotion = wi.get("promotion", {})
-    branch = promotion.get("candidate_branch") or active.get("branch", "")
-    commit = promotion.get("candidate_commit") or active.get("commit", "")
+    # Collect verify commands, criteria refs, paths from ALL target WIs.
+    branch = active_set.get("branch", "")
+    commit = active_set.get("commit", "")
 
-    # Build acceptance criteria refs from behaviors + input_artifacts
-    criteria_refs = []
-    for b in wi.get("behaviors", []):
-        criteria_refs.append(f"docs/product/behavior-spec.md#{b}")
-    for a in wi.get("input_artifacts", []):
-        if a not in criteria_refs:
-            criteria_refs.append(a)
+    all_criteria_refs = []
+    all_files_expected = []
+    all_verify_commands = []
+    all_constraints = []
+    all_non_goals = []
+    spec_revision = 1
 
-    # Build verification commands from the verify field
-    verify_commands = wi.get("verify", [])
-    if not verify_commands:
-        print(f"Error: work item '{args.wi_id}' has no verify commands — cannot build VRM input", file=sys.stderr)
+    for wi in target_wis:
+        spec_revision = max(spec_revision, wi.get("behavior_spec_revision", 1))
+
+        for b in wi.get("behaviors", []):
+            ref = f"docs/product/behavior-spec.md#{b}"
+            if ref not in all_criteria_refs:
+                all_criteria_refs.append(ref)
+        for a in wi.get("input_artifacts", []):
+            if a not in all_criteria_refs:
+                all_criteria_refs.append(a)
+
+        for p in wi.get("owned_paths", []):
+            if p not in all_files_expected:
+                all_files_expected.append(p)
+
+        for v in wi.get("verify", []):
+            if v not in all_verify_commands:
+                all_verify_commands.append(v)
+
+        for c in wi.get("relevant_constraints", []):
+            if c not in all_constraints:
+                all_constraints.append(c)
+
+        for ng in wi.get("non_goals", []):
+            if ng not in all_non_goals:
+                all_non_goals.append(ng)
+
+    if not all_verify_commands:
+        wi_ids = [wi["id"] for wi in target_wis]
+        print(f"Error: work items {wi_ids} have no verify commands — cannot build VRM input", file=sys.stderr)
         return 2
 
     output = {
-        "work_item_id": args.wi_id,
-        "behavior_spec_revision": wi.get("behavior_spec_revision", 1),
+        "candidate_set_id": active_set.get("id"),
+        "work_item_ids": target_ids,
+        "behavior_spec_revision": spec_revision,
         "target_branch": branch,
         "target_commit": commit,
-        "acceptance_criteria_refs": criteria_refs if criteria_refs else [f"docs/product/behavior-spec.md"],
-        "files_expected": wi.get("owned_paths", []),
-        "verification_commands": verify_commands,
-        "relevant_constraints": wi.get("relevant_constraints", []),
-        "non_goals": wi.get("non_goals", []),
+        "acceptance_criteria_refs": all_criteria_refs if all_criteria_refs else ["docs/product/behavior-spec.md"],
+        "files_expected": all_files_expected,
+        "verification_commands": all_verify_commands,
+        "relevant_constraints": all_constraints,
+        "non_goals": all_non_goals,
         "forbidden_context": [
             "builder_summary",
             "builder_diff",

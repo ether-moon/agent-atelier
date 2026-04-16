@@ -142,7 +142,7 @@ Reads accumulated output from all active monitors and classifies events by urgen
   - `heartbeat_warning` (warning) → message Builder via `SendMessage` to send `execute heartbeat`
   - `gate_resolved` → re-read gate state, resume blocked WIs
   - `gate_opened` → present HDR to user immediately
-  - `ci_status` (success) → proceed with VALIDATE → REVIEW_SYNTHESIS transition
+  - `ci_status` (success) → evaluate fast-track, then transition to IMPLEMENT or REVIEW_SYNTHESIS
   - `ci_status` (failure/cancelled) → record validation failure, candidate demotion
   - `branch_divergence` (critical) → inform user, strongly recommend rebase
 - **WARNING events:** Log for next human-visible status report.

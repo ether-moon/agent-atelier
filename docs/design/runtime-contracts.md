@@ -71,16 +71,16 @@ The Validator writes manifests directly to `.agent-atelier/validation/<run-id>/`
 
 These are non-negotiable runtime rules.
 
-1. There is exactly one active writer for orchestration state: State Manager.
-2. A WI may be in `implementing` or `candidate_validating` only when it has a valid active lease.
-3. Only one `active_candidate` may exist at a time.
+1. Control-plane orchestration state has exactly one semantic writer: State Manager. Data-plane verb operations still commit through `state-commit`, but may bypass State Manager for mechanical metadata updates.
+2. A WI may be in `implementing` only when it has a valid active lease.
+3. Only one `active_candidate_set` may exist at a time.
 4. A WI may not become `done` without required evidence references.
 5. A validator may not read builder narrative, builder diffs, or architect interpretation.
 6. Only Orchestrator may communicate with the human.
 7. Watchdog may only perform mechanical, reversible orchestration-state recovery.
 8. Product code and product meaning must never be changed by watchdog recovery.
 9. All state-changing requests must be idempotent by `request_id`.
-10. Every request that mutates orchestration state must include `based_on_revision`.
+10. Every mutation must carry an explicit revision basis: `based_on_revision` for single-file verb writes or per-artifact expected revisions for multi-file transactions.
 
 ---
 
@@ -98,14 +98,14 @@ Every orchestration write follows the same pattern:
 
 ### Request Model
 
-The full SUR (State Update Request) schema is defined in [state-schemas.md §4](./state-schemas.md). It includes `request_id`, `requested_by`, `based_on_revision`, `operation`, `payload`, and `causation_id`.
+The full SUR (State Update Request) schema is defined in [state-schemas.md §4](./state-schemas.md). It includes `request_id`, `requested_by`, revision basis, `operation`, `payload`, and `causation_id`.
 
-In v1, skills expose only the two mechanically enforced fields as CLI flags:
+In v1, single-file flows expose the two mechanically enforced fields directly:
 
 - `--request-id` — idempotency key
 - `--based-on-revision` — optimistic concurrency
 
-The remaining fields (`requested_by`, `operation`, `causation_id`) are implicit: `requested_by` is the invoking role, `operation` is the subcommand name, and `causation_id` is not tracked in v1.
+Multi-file flows must instead carry the matching current revision for every JSON artifact they write inside the `state-commit` transaction. The remaining fields (`requested_by`, `operation`, `causation_id`) are implicit: `requested_by` is the invoking role, `operation` is the subcommand name, and `causation_id` is not tracked in v1.
 
 ### Ack Output
 
@@ -131,7 +131,7 @@ Skills reject via exit code (2 = stale revision, 1 = validation error) and retur
 
 In v1, the request/ack contract is enforced at two layers:
 
-- **Mechanical (state-commit)**: `based_on_revision` → optimistic concurrency via `expected_revision` checks. Stale revisions are rejected with exit code 2. WAL-based crash recovery ensures atomicity.
+- **Mechanical (state-commit)**: revision basis (`based_on_revision` or per-file `expected_revision`) → optimistic concurrency via `expected_revision` checks. Stale revisions are rejected with exit code 2. WAL-based crash recovery ensures atomicity.
 - **Prompt-level (skills)**: `request_id` idempotency, `requested_by`, and `causation_id` tracking are enforced by skill instructions. Each SKILL.md specifies `--request-id` and `--based-on-revision` as required flags and defines replay semantics.
 
 V1 does **not** implement a persistent request journal. This means crash-then-replay-by-request-id cannot be mechanically guaranteed — it depends on the LLM re-reading state and honoring the skill's idempotency rules. A persistent journal is deferred until pilot evidence shows prompt-level enforcement is insufficient.
@@ -149,7 +149,7 @@ A WI completion request must reference:
 - machine-readable evidence manifest refs (via `--evidence-ref`)
 - the verification checks claimed as passed (via `--verify-check`)
 
-Candidate branch/commit matching is validated upstream by the `validate record` skill (Phase 2 preconditions), not re-validated at completion.
+Candidate set, branch, and commit matching are validated by both `validate record` and `execute complete`. Completion must still prove that the passed manifest belongs to the currently active candidate set.
 
 The `execute complete` skill pre-validates that evidence ref paths exist on disk before routing the state update through `state-commit`. State-commit itself enforces only revision atomicity — evidence validation is the skill's responsibility.
 
@@ -166,7 +166,7 @@ The `execute complete` skill pre-validates that evidence ref paths exist on disk
 ### 7.2 Candidate Concurrency
 
 - Multiple WIs may become candidate-ready.
-- Only one candidate may occupy `active_candidate`.
+- Only one candidate set may occupy `active_candidate_set`.
 - Others are serialized into `candidate_queue` in FIFO order.
 - `candidate activate` always pops the first entry from the queue.
 

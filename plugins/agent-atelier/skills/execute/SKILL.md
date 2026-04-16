@@ -19,7 +19,7 @@ argument-hint: "claim <id> | heartbeat <id> | requeue <id> | complete <id> | att
 - Orchestration must be initialized
 - For `claim`: work item must be in `ready` status
 - For `heartbeat`: work item must be `implementing` with a valid lease
-- For `complete`: work item must be in `reviewing` or `candidate_validating`
+- For `complete`: work item must be in `reviewing` status and still belong to the current `active_candidate_set`
 
 ## Allowed Tools
 
@@ -71,16 +71,15 @@ Claims a work item for implementation, establishing a lease.
 
 Extends the lease on a work item the executor is actively working on. Heartbeats prove the executor is alive. Without them, the watchdog will eventually reclaim the item.
 
-1. Read the store.
-2. Find the work item. Verify:
-   - Status is `implementing`
-   - `owner_session_id` matches the caller
-   - Lease has not already expired
-3. Update:
-   - `last_heartbeat_at` → now
-   - `lease_expires_at` → now + lease duration
-   - `revision` → increment by 1
-4. Bump store revision and commit via state-commit.
+**This subcommand uses verb mode** — it calls state-commit directly without SM roundtrip, bypassing the control-plane path for this data-plane-only operation.
+
+1. Read `.agent-atelier/work-items.json`. Note the current store revision.
+2. Verify the WI exists and is in `implementing` status with a matching `owner_session_id`.
+3. Pipe a verb to state-commit:
+   ```bash
+   echo '{"verb":"heartbeat","target":"<WI-ID>","based_on_revision":<current-revision>,"fields":{"last_heartbeat_at":"<now>","lease_expires_at":"<now+lease>"}}' | <plugin-root>/scripts/state-commit --root <repo-root>
+   ```
+3. Check the result. If `stale_revision`, re-read the store and retry with the new revision.
 
 ### `requeue <WI-ID>`
 
@@ -93,7 +92,7 @@ Returns a work item to the queue when the executor cannot continue. This might h
 3. Update:
    - `status` → `ready` (default) or `pending` if specified
    - Clear lease fields: `owner_session_id` → null, `last_heartbeat_at` → null, `lease_expires_at` → null
-   - If requeuing from `reviewing`: additionally clear promotion metadata (`promotion.candidate_branch` → null, `promotion.candidate_commit` → null, `promotion.status` → null)
+   - If requeuing from `reviewing`: additionally clear promotion metadata (`promotion.candidate_branch` → null, `promotion.candidate_commit` → null, `promotion.status` → `not_ready`)
    - If `--increment-stale-requeue`: increment `stale_requeue_count`
    - If `--reason`: set `last_requeue_reason`
    - `revision` → increment by 1
@@ -106,14 +105,17 @@ Returns a work item to the queue when the executor cannot continue. This might h
 
 ### `complete <WI-ID>`
 
-Marks a work item as done. This is a high-bar operation — it requires evidence that the work actually passed validation.
+Marks a work item as done. This is a high-bar operation — it requires evidence that the work actually passed validation. When the last WI in the active candidate set completes, the set is atomically cleared in the same transaction.
 
-1. Read the store.
-2. Find the work item. Verify status is `reviewing` or `candidate_validating`.
+1. Read both `.agent-atelier/work-items.json` and `.agent-atelier/loop-state.json`. Note both revisions.
+2. Find the work item. Verify status is `reviewing`.
 3. **Verify evidence:**
    - Read the validation manifest file at the provided path
+   - `active_candidate_set` is not null and includes `<WI-ID>`
    - Manifest `status` must be `passed`
-   - If manifest has a `work_item_id`, it must match `<WI-ID>`
+   - Manifest `candidate_set_id` must match `active_candidate_set.id`
+   - Manifest `candidate_branch` / `candidate_commit` must match `active_candidate_set.branch` / `active_candidate_set.commit`
+   - Manifest `work_item_ids` must contain `<WI-ID>`
    - All `--evidence-ref` paths must exist on disk
    - At least one `--verify-check` must be provided
 4. Build the completion record:
@@ -126,13 +128,16 @@ Marks a work item as done. This is a high-bar operation — it requires evidence
      "verify_checks": ["<check names>"]
    }
    ```
-5. Update:
+5. Update work-items.json:
    - `status` → `done`
    - Clear lease fields
    - `completion` → the completion record above
    - `revision` → increment by 1
-6. Bump store revision and write.
-7. **Sync native task.** Look up the native task for this WI (see Native Task Lookup below). If found, call `TaskUpdate` with `status: "completed"`.
+6. **Auto-clear candidate set:** Check if `active_candidate_set` contains this WI. If so, check all other WIs in `active_candidate_set.work_item_ids`:
+   - If **all** WIs (including this one after update) are now `done` → include `active_candidate_set → null` in the same transaction (commit both loop-state.json and work-items.json).
+   - If some WIs are not yet done → commit work-items.json only (set stays active for remaining WIs).
+7. Bump store revision(s) and commit.
+8. **Sync native task.** Look up the native task for this WI (see Native Task Lookup below). If found, call `TaskUpdate` with `status: "completed"`.
 
 **Arguments:**
 - `--validation-manifest <path>` — required
@@ -194,7 +199,11 @@ All subcommands accept payload via:
 
 Required flags for all mutating operations:
 - `--request-id <id>` — unique request identifier for idempotency tracking
-- `--based-on-revision <N>` — the store revision observed at read time
+
+Revision handling:
+- Single-file commands (`claim`, `requeue`, `attempt`) use the current `work-items.json` revision
+- Verb commands (`heartbeat`) must pass `based_on_revision` equal to the current `work-items.json` revision
+- Multi-file commands (`complete`) must track the current revision of every file they write (`work-items.json` and, when auto-clearing, `loop-state.json`)
 
 ## Output Contract
 
@@ -228,6 +237,7 @@ The `attempt` subcommand additionally includes the attempt file in `artifacts`. 
 | Lease owner mismatch | `2` | Report who holds the lease and when it expires |
 | Lease already expired | `2` | Suggest requeue first, then re-claim |
 | Validation manifest not passed | `2` | Report manifest status, block completion |
+| Candidate set / branch / commit mismatch | `2` | Report the manifest mismatch and require `validate record` for the active candidate |
 | Evidence file missing | `1` | List which files weren't found |
 | WI not found | `3` | Report missing WI, list available IDs |
 | Stale revision | `2` | Report current vs expected, ask caller to re-read |

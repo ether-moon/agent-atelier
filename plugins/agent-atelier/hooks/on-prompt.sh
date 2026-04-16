@@ -35,10 +35,15 @@ try:
     gates = ls.get('open_gates', [])
     if gates:
         signals.append(f'{len(gates)} open gate(s)')
-    # Signal 2: active candidate
-    ac = ls.get('active_candidate')
-    if ac:
-        signals.append(f'active_candidate={ac}')
+    # Signal 2: active candidate set
+    active_set = ls.get('active_candidate_set')
+    if active_set:
+        wi_ids = active_set.get('work_item_ids', [])
+        set_id = active_set.get('id', 'unknown')
+        if wi_ids:
+            signals.append(f'active_candidate_set={set_id} ({", ".join(wi_ids)})')
+        else:
+            signals.append(f'active_candidate_set={set_id}')
 except Exception:
     pass
 

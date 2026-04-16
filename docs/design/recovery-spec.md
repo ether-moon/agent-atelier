@@ -25,7 +25,7 @@ Recovery goals:
 | Failure Class | Example | Auto-Recover? | Action |
 |---|---|---|---|
 | Executor stalled | No heartbeat, no commit | Yes | Expire lease and requeue WI |
-| Validator stalled | `active_candidate` with no run progress | Yes | Demote candidate, clear slot, alert Orchestrator |
+| Validator stalled | `active_candidate_set` with no run progress | Yes | Demote candidate set, clear slot, alert Orchestrator |
 | Missing evidence | Completion requested without validation manifest | Yes | Reject completion |
 | Repeated implementation loop | Same fingerprint 3 times | No | Escalate to Orchestrator |
 | Gate left open too long | HDR open for 24h | No | Alert only |
@@ -44,7 +44,7 @@ Watchdog may trigger only these automatic actions through State Manager commits:
 - clear `owner_session_id`
 - move a WI from `implementing` to `ready`
 - increment `stale_requeue_count`
-- demote a stale `active_candidate` back to queue
+- demote a stale `active_candidate_set` back to queue
 - reject or flag completion without evidence
 - create an alert record
 

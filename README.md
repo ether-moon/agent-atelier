@@ -89,7 +89,7 @@ Monitor progress at any time:
 | Skill | Purpose |
 |-------|---------|
 | `init` | Bootstrap orchestration workspace (`.agent-atelier/`) |
-| `status` | Show orchestration dashboard — mode, active candidate, open gates, WI summary |
+| `status` | Show orchestration dashboard — mode, active candidate set, open gates, WI summary |
 | `wi` | Work item planning: `list`, `show`, `upsert` |
 | `execute` | Execution lifecycle: `claim`, `heartbeat`, `requeue`, `complete`, `attempt` |
 | `candidate` | Candidate pipeline: `enqueue`, `activate`, `clear` |
@@ -109,10 +109,12 @@ plugins/agent-atelier/
 │   ├── execute/ ├── candidate/├── validate/
 │   ├── gate/    ├── watchdog/ └── run/
 ├── hooks/
-│   ├── hooks.json                   # UserPromptSubmit, PreToolUse, Stop, SubagentStop
-│   ├── on-prompt.sh                 # Signal collector (open gates, active candidate, pending WAL)
+│   ├── hooks.json                   # UserPromptSubmit, PreToolUse, Stop, SubagentStop, TaskCompleted, TaskCreated, TeammateIdle
+│   ├── on-prompt.sh                 # Signal collector (open gates, active candidate set, pending WAL)
 │   ├── on-pre-tool-use.sh           # Destructive command blocking
 │   ├── on-task-completed.sh         # Minimum evidence validation
+│   ├── on-task-created.sh           # Task budget validation
+│   ├── on-teammate-idle.sh          # Auto-assignment / anti-idle loop guidance
 │   └── on-stop.sh                   # Dangling obligation check
 ├── scripts/
 │   ├── state-commit                 # Atomic multi-file writer with WAL and revision checking
@@ -134,7 +136,7 @@ State lives in `.agent-atelier/` (gitignored):
 
 | File | Purpose |
 |------|---------|
-| `loop-state.json` | Control plane: mode, active candidate, candidate queue, open gates |
+| `loop-state.json` | Control plane: mode, active candidate set, candidate queue, open gates |
 | `work-items.json` | WI store: status, lease, promotion, completion |
 | `watchdog-jobs.json` | Timeout thresholds and operating budgets |
 | `validation/<run-id>/manifest.json` | Validation run evidence |
@@ -159,7 +161,7 @@ State lives in `.agent-atelier/` (gitignored):
 bash tests/all.sh
 ```
 
-47 assertions covering plugin structure, hook wiring, script executability, skill presence, role prompt completeness, state schema validation, and mutation flow.
+The test suite covers plugin structure, hook wiring, scripts, schemas, orchestration contracts, mutation flow, and monitor integration.
 
 ## License
 

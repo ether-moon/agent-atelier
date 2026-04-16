@@ -42,6 +42,49 @@ import sys
 import tempfile
 
 
+# ── Verb whitelist (data-plane) ─────────────────────────────────
+# Each verb declares its target file, target type, and the exact
+# set of fields it may modify.  Any field outside the whitelist
+# causes an immediate rejection (exit 1).
+VERB_WHITELIST = {
+    "heartbeat": {
+        "file": ".agent-atelier/work-items.json",
+        "target_type": "work_item",
+        "fields": frozenset({"last_heartbeat_at", "lease_expires_at"}),
+    },
+    "record-attempt": {
+        "file": ".agent-atelier/work-items.json",
+        "target_type": "work_item",
+        "fields": frozenset({"attempt_count", "last_attempt_ref", "last_finding_fingerprint"}),
+    },
+    "record-requeue-meta": {
+        "file": ".agent-atelier/work-items.json",
+        "target_type": "work_item",
+        "fields": frozenset({"stale_requeue_count", "last_requeue_reason"}),
+    },
+    "watchdog-tick-meta": {
+        "file": ".agent-atelier/watchdog-jobs.json",
+        "target_type": "store",
+        "fields": frozenset({"open_alerts", "last_tick_at"}),
+    },
+}
+
+
+def _reject(exit_code, reason, **kwargs):
+    """Write a rejection response to stdout and return the exit code."""
+    json.dump({"committed": False, "reason": reason, **kwargs}, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return exit_code
+
+
+def _find_wi_write(writes):
+    """Find the work-items.json write in a transaction, or None."""
+    for w in writes:
+        if w["path"].endswith("work-items.json"):
+            return w
+    return None
+
+
 def resolve_root(explicit):
     if explicit:
         return os.path.realpath(explicit)
@@ -157,6 +200,255 @@ def _emit_event(root, tx, artifacts):
         print(f"state-commit: event emit failed: {exc}", file=sys.stderr)
 
 
+def _verb_commit(root, verb_input):
+    """Verb mode: data-plane write with field whitelist validation.
+
+    Reads the target file, validates verb+fields against the whitelist,
+    applies the patch, bumps revisions, then delegates to _commit for
+    WAL-based atomic write.
+    """
+    if not isinstance(verb_input, dict):
+        return _reject(1, "invalid_verb_payload", message="verb transaction must be a JSON object")
+
+    verb = verb_input.get("verb")
+    target = verb_input.get("target")
+    fields = verb_input.get("fields", {})
+    based_on_revision = verb_input.get("based_on_revision")
+
+    if verb not in VERB_WHITELIST:
+        return _reject(1, "unknown_verb", verb=verb)
+
+    spec = VERB_WHITELIST[verb]
+
+    if not isinstance(fields, dict):
+        return _reject(1, "invalid_verb_payload", message="'fields' must be an object")
+
+    if not isinstance(based_on_revision, int):
+        return _reject(1, "invalid_verb_payload", message="'based_on_revision' must be an integer")
+
+    # Validate fields against whitelist
+    disallowed = set(fields.keys()) - spec["fields"]
+    if disallowed:
+        return _reject(1, "field_not_allowed", verb=verb, disallowed_fields=sorted(disallowed))
+
+    if not fields:
+        return _reject(1, "no_fields", verb=verb)
+
+    # Read current file
+    file_rel = spec["file"]
+    file_path = resolve_tx_path(root, file_rel)
+
+    if not os.path.exists(file_path):
+        return _reject(1, "target_file_missing", path=file_rel)
+
+    with open(file_path, encoding="utf-8") as fh:
+        store = json.load(fh)
+
+    current_revision = store.get("revision")
+    if current_revision != based_on_revision:
+        return _reject(2, "stale_revision", path=file_rel,
+                        expected=based_on_revision, actual=current_revision)
+
+    if spec["target_type"] == "work_item":
+        if not target:
+            return _reject(1, "missing_target", verb=verb)
+
+        items = store.get("items", [])
+        wi_index = None
+        for i, item in enumerate(items):
+            if item.get("id") == target:
+                wi_index = i
+                break
+
+        if wi_index is None:
+            return _reject(1, "target_not_found", target=target)
+
+        # Apply field patches to WI
+        for k, v in fields.items():
+            store["items"][wi_index][k] = v
+
+        # Bump WI revision
+        store["items"][wi_index]["revision"] = store["items"][wi_index].get("revision", 0) + 1
+
+    elif spec["target_type"] == "store":
+        # Apply field patches at store level
+        for k, v in fields.items():
+            store[k] = v
+
+    # Bump store revision + updated_at
+    store["revision"] = (based_on_revision or 0) + 1
+    store["updated_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Construct transaction and commit through normal path
+    tx = {
+        "writes": [{
+            "path": file_rel,
+            "expected_revision": based_on_revision,
+            "content": store,
+        }],
+        "deletes": [],
+        "message": f"verb:{verb} target:{target or 'store'}",
+    }
+
+    return _commit(root, tx, tx["writes"], tx["deletes"])
+
+
+def _resolve_dependencies(root, writes):
+    """Pre-WAL: auto-transition pending WIs to ready when all deps are done.
+
+    Compares the new state (in the transaction) against the current on-disk
+    state to find WIs that are newly transitioning to 'done'.  For each
+    'pending' WI whose entire depends_on set is now 'done', mutates its
+    status to 'ready' in-place (same transaction).
+
+    Returns list of auto-transitioned WI IDs.
+    """
+    wi_write = _find_wi_write(writes)
+    if wi_write is None:
+        return []
+
+    new_content = wi_write["content"]
+    if not isinstance(new_content, dict):
+        return []
+
+    new_items = new_content.get("items", [])
+    if not new_items:
+        return []
+
+    # Read old state to identify newly-done WIs
+    old_path = resolve_tx_path(root, wi_write["path"])
+    old_status = {}
+    if os.path.exists(old_path):
+        with open(old_path, encoding="utf-8") as fh:
+            old_data = json.load(fh)
+        for item in old_data.get("items", []):
+            old_status[item["id"]] = item.get("status")
+
+    # Check if any WI newly transitioned to done
+    newly_done = False
+    for item in new_items:
+        if item.get("status") == "done" and old_status.get(item["id"]) != "done":
+            newly_done = True
+            break
+
+    if not newly_done:
+        return []
+
+    # Build new status map
+    new_status = {item["id"]: item.get("status") for item in new_items}
+
+    # Find pending WIs whose all deps are now done
+    transitioned = []
+    for item in new_items:
+        if item.get("status") != "pending":
+            continue
+        deps = item.get("depends_on", [])
+        if not deps:
+            continue
+        if all(new_status.get(dep) == "done" for dep in deps):
+            item["status"] = "ready"
+            item["revision"] = item.get("revision", 0) + 1
+            transitioned.append(item["id"])
+
+    return transitioned
+
+
+def _depends_on_changed(root, writes):
+    """Return True when this transaction mutates any WI dependency set."""
+    wi_write = _find_wi_write(writes)
+    if wi_write is None:
+        return False
+
+    content = wi_write["content"]
+    if not isinstance(content, dict):
+        return False
+
+    new_items = content.get("items", [])
+    old_items = {}
+    old_path = resolve_tx_path(root, wi_write["path"])
+    if os.path.exists(old_path):
+        with open(old_path, encoding="utf-8") as fh:
+            old_data = json.load(fh)
+        old_items = {
+            item.get("id"): item.get("depends_on", [])
+            for item in old_data.get("items", [])
+        }
+
+    for item in new_items:
+        wi_id = item.get("id")
+        new_deps = item.get("depends_on", [])
+        old_deps = old_items.get(wi_id)
+        if old_deps is None:
+            if new_deps:
+                return True
+            continue
+        if old_deps != new_deps:
+            return True
+
+    return False
+
+
+def _detect_cycles(writes):
+    """Check for dependency cycles in work-items.json.
+
+    Returns list of WI IDs forming the cycle, or None if no cycle exists.
+    """
+    wi_write = _find_wi_write(writes)
+    if wi_write is None:
+        return None
+
+    content = wi_write["content"]
+    if not isinstance(content, dict):
+        return None
+
+    items = content.get("items", [])
+    if not items:
+        return None
+
+    # Build adjacency: WI → its dependencies
+    graph = {}
+    all_ids = set()
+    for item in items:
+        wi_id = item.get("id")
+        all_ids.add(wi_id)
+        deps = item.get("depends_on", [])
+        if deps:
+            graph[wi_id] = deps
+
+    if not graph:
+        return None
+
+    # DFS cycle detection (three-color algorithm)
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = {wi_id: WHITE for wi_id in all_ids}
+    path = []
+
+    def dfs(node):
+        color[node] = GRAY
+        path.append(node)
+        for dep in graph.get(node, []):
+            if dep not in color:
+                continue  # dangling ref — not a WI in this store
+            if color[dep] == GRAY:
+                cycle_start = path.index(dep)
+                return path[cycle_start:] + [dep]
+            if color[dep] == WHITE:
+                result = dfs(dep)
+                if result:
+                    return result
+        path.pop()
+        color[node] = BLACK
+        return None
+
+    for node in list(all_ids):
+        if color[node] == WHITE:
+            cycle = dfs(node)
+            if cycle:
+                return cycle
+
+    return None
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(prog="state-commit")
@@ -169,37 +461,33 @@ def main():
     tx = None
     writes = []
     deletes = []
+    is_verb = False
 
     if not args.replay:
         try:
             tx = json.load(sys.stdin)
         except json.JSONDecodeError as exc:
-            json.dump({
-                "committed": False,
-                "reason": "invalid_transaction",
-                "message": str(exc),
-            }, sys.stdout, indent=2)
-            sys.stdout.write("\n")
-            return 1
+            return _reject(1, "invalid_transaction", message=str(exc))
 
-        writes = tx.get("writes", [])
-        deletes = tx.get("deletes", [])
-        if not writes and not deletes:
-            print("Empty transaction", file=sys.stderr)
-            return 1
-        try:
-            for w in writes:
-                resolve_tx_path(root, w["path"])
-            for d in deletes:
-                resolve_tx_path(root, d)
-        except (KeyError, ValueError) as exc:
-            json.dump({
-                "committed": False,
-                "reason": "invalid_path",
-                "message": str(exc),
-            }, sys.stdout, indent=2)
-            sys.stdout.write("\n")
-            return 1
+        if not isinstance(tx, dict):
+            return _reject(1, "invalid_transaction", message="transaction must be a JSON object")
+
+        is_verb = "verb" in tx
+        if not is_verb:
+            writes = tx.get("writes", [])
+            deletes = tx.get("deletes", [])
+            if not isinstance(writes, list) or not isinstance(deletes, list):
+                return _reject(1, "invalid_transaction", message="'writes' and 'deletes' must be lists")
+            if not writes and not deletes:
+                print("Empty transaction", file=sys.stderr)
+                return 1
+            try:
+                for w in writes:
+                    resolve_tx_path(root, w["path"])
+                for d in deletes:
+                    resolve_tx_path(root, d)
+            except (KeyError, ValueError) as exc:
+                return _reject(1, "invalid_path", message=str(exc))
 
     # ── Acquire exclusive lock ────────────────────────────────────────
     # flock serializes concurrent agents so the validate→write window
@@ -213,6 +501,8 @@ def main():
 
         if args.replay:
             return _replay(root)
+        elif is_verb:
+            return _verb_commit(root, tx)
         else:
             return _commit(root, tx, writes, deletes)
     finally:
@@ -231,15 +521,20 @@ def _commit(root, tx, writes, deletes):
         path = resolve_tx_path(root, w["path"])
         current = read_revision(path)
         if current != expected:
-            json.dump({
-                "committed": False,
-                "reason": "stale_revision",
-                "path": w["path"],
-                "expected": expected,
-                "actual": current,
-            }, sys.stdout, indent=2)
-            sys.stdout.write("\n")
-            return 2
+            return _reject(2, "stale_revision", path=w["path"],
+                            expected=expected, actual=current)
+
+    # Phase 1b: dependency cycle detection
+    if _depends_on_changed(root, writes):
+        cycle = _detect_cycles(writes)
+        if cycle:
+            return _reject(1, "dependency_cycle", cycle=cycle)
+
+    # Phase 1c: pre-WAL dependency resolution
+    auto_transitioned = _resolve_dependencies(root, writes)
+    if auto_transitioned:
+        print(f"state-commit: auto-transitioned {auto_transitioned} pending→ready",
+              file=sys.stderr)
 
     # Phase 2: write WAL
     wal_path = os.path.join(root, ".agent-atelier/.pending-tx.json")
@@ -294,9 +589,7 @@ def _replay(root):
     """
     wal_path = os.path.join(root, ".agent-atelier/.pending-tx.json")
     if not os.path.exists(wal_path):
-        json.dump({"committed": False, "reason": "wal_missing"}, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 4
+        return _reject(4, "wal_missing")
 
     try:
         with open(wal_path, encoding="utf-8") as fh:
@@ -306,13 +599,7 @@ def _replay(root):
         if not isinstance(writes, list) or not isinstance(deletes, list):
             raise ValueError("WAL transaction must contain list fields: writes, deletes")
     except (OSError, json.JSONDecodeError, ValueError) as exc:
-        json.dump({
-            "committed": False,
-            "reason": "wal_invalid",
-            "message": str(exc),
-        }, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 4
+        return _reject(4, "wal_invalid", message=str(exc))
 
     artifacts = []
     skipped = []
@@ -328,16 +615,8 @@ def _replay(root):
             continue
 
         if expected_rev is not None and current_rev != expected_rev and current_rev != target_rev:
-            json.dump({
-                "committed": False,
-                "reason": "replay_conflict",
-                "path": w["path"],
-                "expected": expected_rev,
-                "target": target_rev,
-                "actual": current_rev,
-            }, sys.stdout, indent=2)
-            sys.stdout.write("\n")
-            return 4
+            return _reject(4, "replay_conflict", path=w["path"],
+                            expected=expected_rev, target=target_rev, actual=current_rev)
 
         atomic_write(path, serialize(w["content"]))
         artifacts.append(w["path"])
