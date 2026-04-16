@@ -41,16 +41,16 @@ Create the team and spawn teammates using subagent definitions from `.claude/age
 
 Derive the team name from the git repository root:
 
-```
-root      = git rev-parse --show-toplevel
-base      = sanitize(basename(root))
-hash      = sha256(root)[0:4]
-team_name = "atelier-" + base + "-" + hash
+```bash
+root=$(git rev-parse --show-toplevel)
+base=$(basename "$root" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_-' '-' | sed 's/-\{2,\}/-/g; s/^-//; s/-$//' | cut -c1-20)
+hash=$(printf '%s' "$root" | shasum -a 256 | cut -c1-4)
+team_name="atelier-${base}-${hash}"
 ```
 
-Sanitization: lowercase → replace `[^a-z0-9_-]` with `-` → collapse consecutive `-` → strip leading/trailing `-` → truncate base to 20 chars.
+Sanitization: lowercase → replace `[^a-z0-9_-]` with `-` → collapse consecutive `-` → strip leading/trailing `-` → then truncate to 20 chars.
 
-Examples: `/Users/ether/.../lahore` → `atelier-lahore-a3f2`, `/Users/ether/.../karrot-tms` → `atelier-karrot-tms-7b1e`.
+Examples (illustrative — hashes depend on full absolute path): `/Users/ether/.../lahore` → `atelier-lahore-a3f2`, `/Users/ether/.../karrot-tms` → `atelier-karrot-tms-7b1e`.
 
 Before creating the team, check for a stale team with the same name. If `~/.claude/teams/<team_name>/` exists:
 
@@ -64,7 +64,7 @@ Before creating the team, check for a stale team with the same name. If `~/.clau
 Then create the team:
 
 ```text
-TeamCreate(team_name=<derived team_name>, description="Autonomous product development loop")
+TeamCreate(team_name=<team_name>, description="Autonomous product development loop")
 ```
 
 After team creation, persist the derived team name to loop-state via `state-commit` directly (State Manager is not yet spawned): set `team_name` to the derived value. This allows hooks and cleanup verification to locate team resources without hardcoding.
