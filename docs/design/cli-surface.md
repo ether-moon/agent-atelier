@@ -178,6 +178,8 @@ Evaluates orchestration state, performs allowed mechanical recovery, and writes 
 
 The command must be safe to run repeatedly.
 
+`watchdog tick` is mechanical only. Owner reachability checks, teammate respawn, and work re-dispatch belong to the Orchestrator's resume sweep after the tick.
+
 ### 4.9 Orchestration Runner
 
 #### `agent-atelier run`
@@ -185,6 +187,13 @@ The command must be safe to run repeatedly.
 Top-level entry point for the autonomous development loop. Spawns the agent team, drives work items through the full lifecycle (spec → implement → validate → review → done), and manages role activation/shutdown by phase.
 
 This is the highest-level command — it orchestrates all other commands internally. It is not a state-mutating command in the traditional sense; it is a long-running coordinator.
+
+`run` also owns the lifecycle of session-scoped runtime infrastructure:
+
+- creates fresh monitors
+- creates the `*/2` monitor poll cron job
+- creates the `*/15` watchdog recovery cron job
+- after crash recovery, runs one startup resume sweep so stranded `implementing` WIs are reclaimed immediately instead of waiting for lease expiry
 
 Required preconditions:
 

@@ -171,8 +171,17 @@ The lease is lost when:
 - `lease_expires_at` passes
 - State Manager explicitly clears ownership
 - watchdog demotes or requeues the WI
+- a recovery pulse determines the recorded owner session no longer exists or is no longer reachable, and the Orchestrator requeues the WI through State Manager
 
 After lease loss, the old holder must be treated as read-only and must not be allowed to complete the WI.
+
+### Lease Reachability
+
+An unexpired lease remains valid only while the recorded owner is still reachable.
+
+- normal steady-state execution assumes reachability unless proven otherwise
+- after crash recovery or a watchdog recovery pulse, the Orchestrator must verify that an `implementing` WI's owner session still exists before treating the lease as resumable
+- if the owner is gone, the WI may be requeued immediately without waiting for the original lease expiry
 
 ---
 
@@ -202,7 +211,7 @@ Cold-start resume algorithm:
 5. read review findings (`.agent-atelier/reviews/<WI-ID>/findings.json`) — if a WI is in `reviewing` status, this file is the source of truth for review state recovery. If absent, re-initiate from REVIEW_SYNTHESIS.
 6. read watchdog state
 7. classify every WI:
-   - valid active lease -> continue only if lease holder still exists
+   - valid active lease -> continue only if lease holder still exists and is reachable
    - expired lease -> requeue
    - blocked gate -> keep blocked
    - active candidate without validator progress -> watchdog policy

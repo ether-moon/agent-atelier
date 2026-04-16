@@ -30,6 +30,8 @@ cat .agent-atelier/.pending-tx.json | <plugin-root>/scripts/state-commit --root 
 
 This completes partially applied transactions before any other recovery.
 
+Cold resume assumes the previous runtime is gone. Reachable-owner resume applies only to the in-session 15-minute recovery pulse, not to this protocol.
+
 ### Step 3: Classify Each Work Item
 
 For each WI, determine its recoverable state:
@@ -37,7 +39,7 @@ For each WI, determine its recoverable state:
 | Current Status | Lease | Action |
 |---|---|---|
 | `implementing` | Expired | Requeue to `ready`, clear lease, increment `stale_requeue_count` |
-| `implementing` | Valid | Resume — a Builder can re-claim after fresh spawn |
+| `implementing` | Still valid from the crashed runtime | Mark for immediate reclaim in the startup resume sweep started by `/agent-atelier:run`; do not wait for lease expiry |
 | `candidate_validating` | Stale (> timeout) | Demote candidate, requeue WI to `ready` |
 | `candidate_validating` | Recent | Resume — VRM can pick up active candidate |
 | `reviewing` | Stale (> timeout) | Re-dispatch reviewers |
@@ -57,15 +59,30 @@ Scan `human-gates/open/` for pending HDRs. Cross-reference with `loop-state.json
 
 Apply all mechanical recovery changes (stale lease expiry, candidate demotion) in a single `state-commit` transaction via the watchdog `tick` subcommand.
 
+Still-valid `implementing` leases from the crashed runtime are not cleared by `watchdog tick`. They are reclaimed in the startup resume sweep that runs immediately after `/agent-atelier:run` restores the core team.
+
 ### Step 6: Spawn Fresh Team
 
 Start a new orchestration loop (`/agent-atelier:run`). The orchestrator reads the recovered state and spawns fresh teammates based on the current mode and WI states.
 
-### Step 6b: Re-Spawn Monitors
+### Step 6b: Run-Owned Runtime Restoration
 
-Invoke `/agent-atelier:monitors spawn` to start fresh always-on monitors (heartbeat, gate, events, divergence). Create a new `CronCreate` poll job with the returned task IDs. Previous session's monitors and cron jobs are gone — they were session-scoped and died with the crashed session.
+Do not separately invoke `/agent-atelier:monitors spawn` after calling `/agent-atelier:run`. The run skill owns restoration of session-scoped runtime infrastructure:
 
-If CI validation was in progress when the session crashed (i.e., `active_candidate` is non-null and mode is VALIDATE), check whether a ci-status monitor needs to be spawned for the active candidate's CI run via `/agent-atelier:monitors spawn-ci`.
+- it recreates fresh always-on monitors
+- it recreates the monitor poll job (`*/2`) wired to `/agent-atelier:monitors check`
+- it recreates the watchdog recovery pulse job (`*/15`) wired to `/agent-atelier:watchdog tick` plus the Orchestrator resume sweep
+- it runs one startup resume sweep before steady-state dispatch
+
+During that startup resume sweep:
+
+- any WI still in `implementing` is treated as stranded from the previous runtime and requeued immediately through State Manager
+- `ready` WIs return to the normal Builder dispatch path
+- `active_candidate` / `candidate_validating` work resumes with a fresh or reachable VRM as appropriate
+- `reviewing` WIs resume from persisted review artifacts with fresh or reachable reviewers as appropriate
+- if CI validation was already in progress, the Orchestrator re-creates the ci-status monitor if needed
+
+Previous session's monitors and cron jobs are gone — they were session-scoped and died with the crashed session. `/agent-atelier:run` is the only component that should recreate them.
 
 ### Step 7: Resume From Committed State Only
 
@@ -100,3 +117,4 @@ These scenarios must work correctly (from recovery-spec.md):
 5. **Open gate survives restart** — HDR files persist, gate awareness restored from disk
 6. **Stale revision rejected** — Concurrent writes detected and rejected by state-commit
 7. **Cold resume from disk** — Full state reconstruction from files + git log without conversation history
+8. **Valid lease from crashed runtime** — Startup resume sweep requeues stranded `implementing` work immediately instead of waiting for lease expiry
