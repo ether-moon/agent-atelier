@@ -39,11 +39,35 @@ Use Agent Teams to create one flat team for the development loop.
 
 Create the team and spawn teammates using subagent definitions from `.claude/agents/`:
 
-```text
-TeamCreate(team_name="agent-atelier-dev", description="Autonomous product development loop")
+Derive the team name from the git repository root:
+
+```
+root      = git rev-parse --show-toplevel
+base      = sanitize(basename(root))
+hash      = sha256(root)[0:4]
+team_name = "atelier-" + base + "-" + hash
 ```
 
-After team creation, persist the team name to loop-state via `state-commit` directly (State Manager is not yet spawned): set `team_name` to `"agent-atelier-dev"`. This allows hooks and cleanup verification to locate team resources without hardcoding.
+Sanitization: lowercase → replace `[^a-z0-9_-]` with `-` → collapse consecutive `-` → strip leading/trailing `-` → truncate base to 20 chars.
+
+Examples: `/Users/ether/.../lahore` → `atelier-lahore-a3f2`, `/Users/ether/.../karrot-tms` → `atelier-karrot-tms-7b1e`.
+
+Before creating the team, check for a stale team with the same name. If `~/.claude/teams/<team_name>/` exists:
+
+1. Try `TeamDelete` to remove it cleanly.
+2. If `TeamDelete` fails (e.g., stale members from a crashed session), force-remove:
+   ```bash
+   rm -rf ~/.claude/teams/<team_name>/
+   rm -rf ~/.claude/tasks/<team_name>/
+   ```
+
+Then create the team:
+
+```text
+TeamCreate(team_name=<derived team_name>, description="Autonomous product development loop")
+```
+
+After team creation, persist the derived team name to loop-state via `state-commit` directly (State Manager is not yet spawned): set `team_name` to the derived value. This allows hooks and cleanup verification to locate team resources without hardcoding.
 
 Then spawn each core teammate by referencing their agent type:
 
