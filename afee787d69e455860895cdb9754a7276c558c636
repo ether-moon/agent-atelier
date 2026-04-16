@@ -1,0 +1,24 @@
+Decisions Made
+- Kept the final `state-commit` verb-mode guard behavior in a separate follow-up commit before PR creation.
+- Preserved structured rejection responses and explicit `based_on_revision` enforcement in the committed branch state.
+
+Problems Encountered
+- After the main contract-alignment commit, `plugins/agent-atelier/scripts/state-commit` remained dirty with intended guard changes not yet reflected in `HEAD`.
+
+Constraints Identified
+- Could not amend the previous commit without an explicit user request.
+- The PR branch needed to reflect the same `state-commit` behavior that had already been exercised by tests.
+
+Open Questions
+- None.
+
+Context
+- This follow-up commit was created while preparing the branch for PR creation.
+- The branch had already been rebased onto latest `origin/main`.
+
+Recorded Decisions
+- Use a second fix commit rather than rewriting published history.
+- Re-run the test suite after committing the final `state-commit` content.
+
+Vault Entries Referenced
+- None.
