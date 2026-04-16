@@ -1,0 +1,20 @@
+## Decisions Made
+- Update on-stop.sh fallback glob from `agent-atelier-*` to `atelier-*` to align with session-scoped team naming introduced in Task 1.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- The fallback glob pattern must match the new team directory naming scheme to enable proper cleanup detection.
+
+## Open Questions
+- None
+
+## Context
+Task 2 updated the on-stop.sh hook to recognize the new session-scoped team naming convention (atelier-<base>-<hash> instead of agent-atelier-*). Changed comment on line 72 and glob pattern on line 77, then verified with grep and ran the full test suite—all 56 tests pass. Work complete.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
