@@ -1,0 +1,23 @@
+## Decisions Made
+- Replace pseudocode with concrete bash snippet: explicit about shell constructs, variable assignment, and string interpolation for clarity
+- Mark hash examples as illustrative: hashes depend on full absolute path, reducing user confusion about determinism
+- Make sanitization ordering explicit: truncation step now clearly positioned as final step in the sequence
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- Team name length capped at 20 chars (post-truncation) for AWS/GCP naming compatibility
+- Hash derived from full absolute git root path (not basename), so examples vary based on user environment
+
+## Open Questions
+- None
+
+## Context
+Fixed code quality issues in the run skill's team name derivation block (lines 40-75). Applied 5 targeted clarifications: concrete bash code, explicit sanitization step ordering, illustrative markers on examples, and variable name consistency in TeamCreate call. All changes improve documentation clarity without altering runtime behavior.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
