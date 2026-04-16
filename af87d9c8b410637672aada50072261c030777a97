@@ -1,0 +1,33 @@
+Decisions Made
+- Standardized batch validation contracts on `candidate_set_id` plus `work_item_ids`.
+- Made `validate record` the authoritative validation state transition path and documented `execute complete` as a reviewing-only action.
+- Enforced BUILD_PLAN gating on `verify` and non-null `complexity` in the task completion hook.
+- Restored stale-write protection for verb-mode state commits by requiring `based_on_revision`.
+
+Problems Encountered
+- `state-commit` verb mode accepted stale writes because it derived `expected_revision` from current state.
+- VRM prompt output and schema had diverged between single-item and batch candidate models.
+- Recovery and run-skill docs had drifted from the active-candidate-set model and conflicted during rebase.
+- Rebase on top of latest `origin/main` produced conflicts in recovery and run-skill contracts.
+
+Constraints Identified
+- Runtime behavior is split between executable scripts/hooks and `SKILL.md`/prompt contracts; many fixes required contract alignment rather than new runtime code.
+- All state writes must continue to flow through `state-commit`.
+- Existing user changes in the worktree could not be discarded.
+
+Open Questions
+- Whether a future standalone `agent-atelier` CLI should replace or supplement the current skill-driven runtime surface.
+- Whether higher-level end-to-end orchestration integration tests should be added beyond current contract and mutation coverage.
+
+Context
+- Implemented follow-up fixes from the orchestration v0.2 review against the two-tier state / batch candidate design notes.
+- Rebased `feedback-analysis` onto `origin/main` before finalizing the contract alignment changes.
+- Verified the resulting branch with `bash tests/all.sh`.
+
+Recorded Decisions
+- Keep recovery ownership in `/agent-atelier:run`, with watchdog limited to mechanical recovery and startup resume sweep handling stranded implementing work.
+- Treat `active_candidate_set` as the canonical validation slot signal across docs, hooks, and tests.
+- Require regression coverage for verb-mode validation, orchestration contracts, and recovery contract invariants.
+
+Vault Entries Referenced
+- None.
