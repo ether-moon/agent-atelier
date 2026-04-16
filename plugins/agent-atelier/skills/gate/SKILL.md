@@ -25,13 +25,7 @@ Human gates are the system's mechanism for pausing when a decision is too conseq
 
 ## Write Protocol
 
-Gate operations touch multiple files (HDR, work-items.json, loop-state.json, _index.md). All writes go through a single `state-commit` transaction to prevent partial updates. If the session stops between read and commit, no files change. If it stops after commit, all files are consistent.
-
-```bash
-echo '<transaction-json>' | <plugin-root>/scripts/state-commit --root <repo-root>
-```
-
-The transaction includes every file that needs to change, with `expected_revision` set for JSON files that have revision tracking. The `_index.md` and new HDR files use `expected_revision: null` since they're created or have no revision field.
+All gate writes go through a single `state-commit` transaction (pipe JSON to `<plugin-root>/scripts/state-commit --root <repo-root>`). This prevents partial updates across the HDR file, work-items.json, loop-state.json, and _index.md. See `reference/transactions.md` for full transaction format, examples, and revision rules.
 
 ## The 3-Test Gate Criteria
 
@@ -98,16 +92,7 @@ Creates a new human decision request. The orchestrator provides the decision con
    - Updated loop-state.json with HDR ID added to `open_gates`, revision bumped
    - Updated `_index.md` with new row in "Open Gates" table
 
-5. **Commit all changes in one transaction** via state-commit. The transaction includes all four files:
-   ```json
-   {"writes": [
-     {"path": ".agent-atelier/human-gates/open/HDR-010.json", "expected_revision": null, "content": {...}},
-     {"path": ".agent-atelier/work-items.json", "expected_revision": 7, "content": {...}},
-     {"path": ".agent-atelier/loop-state.json", "expected_revision": 41, "content": {...}},
-     {"path": ".agent-atelier/human-gates/_index.md", "expected_revision": null, "content": "..."}
-   ]}
-   ```
-   If any revision check fails, the entire transaction is rejected — no partial state.
+5. **Commit all changes in one transaction** via state-commit (four files: HDR, work-items, loop-state, _index.md). See `reference/transactions.md#open-gate-transaction` for the exact JSON format. If any revision check fails, the entire transaction is rejected.
 
 ### `resolve <HDR-ID> <chosen-option>`
 
@@ -121,17 +106,7 @@ Resolves an open gate with the user's decision.
    - Updated loop-state.json: remove HDR ID from `open_gates`
    - Updated `_index.md`: move row from "Open Gates" to "Resolved Gates"
 
-3. **Commit all changes in one transaction** via state-commit, including the `open/` file deletion:
-   ```json
-   {"writes": [
-     {"path": ".agent-atelier/human-gates/resolved/HDR-010.json", "expected_revision": null, "content": {...}},
-     {"path": ".agent-atelier/work-items.json", "expected_revision": 7, "content": {...}},
-     {"path": ".agent-atelier/loop-state.json", "expected_revision": 41, "content": {...}},
-     {"path": ".agent-atelier/human-gates/_index.md", "expected_revision": null, "content": "..."}
-   ],
-   "deletes": [".agent-atelier/human-gates/open/HDR-010.json"]}
-   ```
-   The delete is part of the transaction — it happens after all writes succeed, and is included in the WAL for crash recovery. No separate delete step needed.
+3. **Commit all changes in one transaction** via state-commit, including the `open/` file deletion. The delete is part of the transaction and included in the WAL for crash recovery. See `reference/transactions.md#resolve-gate-transaction` for the exact JSON format.
 
 ## Exit Codes
 

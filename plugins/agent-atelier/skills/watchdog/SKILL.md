@@ -1,26 +1,26 @@
 ---
 name: watchdog
-description: "Health check and mechanical recovery — detect stale leases, expired candidates, and stuck work items, then take safe recovery actions. Use for routine health checks, when something seems stuck, or when the user says 'watchdog', 'health check', 'check for stale items', 'anything stuck?', or 'run maintenance'. Also appropriate after a session crash or long idle period to clean up orphaned leases."
+description: "Health check and mechanical recovery — detect stale leases, expired candidates, stuck reviews, and blocked work items, then take safe recovery actions. Also enforces operating budgets and replays interrupted transactions. Use for routine health checks, when something seems stuck, or when the user says 'watchdog', 'health check', 'check for stale items', 'anything stuck?', 'run maintenance', 'check budgets', 'recovery sweep', or 'clean up orphaned leases'. Also appropriate after a session crash or long idle period."
 argument-hint: "[tick]"
 ---
 
 # Watchdog — Health Check and Mechanical Recovery
 
-The watchdog exists because agent sessions can crash, time out, or simply disappear. Without cleanup, work items would stay in `implementing` forever with expired leases, blocking progress. The watchdog detects these situations and takes safe, mechanical recovery actions.
+Agent sessions can crash, time out, or disappear. Without cleanup, work items stay in `implementing` forever with expired leases, blocking progress. The watchdog detects these situations and takes safe, mechanical recovery actions.
 
-In the long-running loop, watchdog `tick` is the mechanical half of a larger 15-minute recovery pulse. The follow-up teammate respawn, owner reachability check, and work re-dispatch are Orchestrator responsibilities after the tick completes successfully.
+In the long-running loop, watchdog `tick` is the mechanical half of a 15-minute recovery pulse. Teammate respawn, owner reachability checks, and work re-dispatch are Orchestrator responsibilities after the tick completes.
 
 ## When This Skill Runs
 
-- Routine health check (recommended: at start of each orchestrator session)
+- Routine health check (recommended: start of each orchestrator session)
 - After a session crash or unexpected termination
 - When the user suspects something is stuck
 - Periodically during long-running orchestration loops
-- As the first step of the independent 15-minute recovery pulse created by `/agent-atelier:run`
+- As the first step of the 15-minute recovery pulse from `/agent-atelier:run`
 
 ## Prerequisites
 
-- Orchestration must be initialized
+- Orchestration must be initialized (`.agent-atelier/` state files exist)
 
 ## Allowed Tools
 
@@ -28,161 +28,52 @@ In the long-running loop, watchdog `tick` is the mechanical half of a larger 15-
 
 ## Safety Principle
 
-The watchdog performs ONLY mechanical, reversible recovery. It never:
-- Edits product code or the behavior spec
-- Merges branches
-- Resolves human gates
-- Invents validation results
-- Makes product decisions (promoting the next candidate from `candidate_queue` is mechanical — the queue order was already decided by the Orchestrator)
+The watchdog performs ONLY mechanical, reversible recovery. It never edits product code, merges branches, resolves human gates, invents validation results, or makes product decisions. Promoting the next candidate from `candidate_queue` is mechanical (FIFO order was already decided). If something requires judgment, the watchdog escalates to the orchestrator.
 
-If something requires judgment, the watchdog escalates to the orchestrator.
-
-The watchdog also does not decide whether a still-valid lease holder is reachable. If a WI remains `implementing` with an unexpired lease, the watchdog leaves it alone; the Orchestrator's recovery pulse may still reclaim it immediately if the recorded owner session no longer exists.
+The watchdog does not assess whether a lease holder is still reachable. If a WI remains `implementing` with an unexpired lease, the watchdog leaves it alone; the Orchestrator's recovery pulse handles reachability.
 
 ## Execution Steps
 
-### 0. Check for Incomplete Transactions (WAL Recovery)
+Each step is summarized below. See `reference/execution-details.md` for field-level specifics.
 
-Before anything else, check if `.agent-atelier/.pending-tx.json` exists. This file is a write-ahead log left behind if a previous state-commit was interrupted mid-write.
+1. **WAL Recovery** — If `.agent-atelier/.pending-tx.json` exists, replay the interrupted transaction with `state-commit --replay` before any other checks.
+2. **Read State** — Read `loop-state.json`, `work-items.json`, `watchdog-jobs.json`. Note timeout thresholds: implementing (90 min), candidate (30 min), review (30 min), gate warning (24 hr).
+3. **Stale Leases** — For each `implementing` WI with an expired lease: requeue to `ready`, clear lease fields, increment `stale_requeue_count`.
+4. **Stale Reviews** — For each `reviewing` WI past `review_timeout_minutes`: requeue to `ready`.
+5. **Stale Candidates** — If `active_candidate_set` has timed out: requeue all WIs, clear promotion metadata, advance queue (FIFO) if non-empty.
+6. **Long-Open Gates** — Scan `human-gates/open/` for HDR files older than `gate_warn_after_hours`. Create warning alerts.
+7. **Repeated Failures** — Flag WIs with 3+ same finding fingerprints or 2+ watchdog interventions for orchestrator review.
+8. **Budget Enforcement** — Check wall-clock time, handoff count, watchdog interventions, and attempt count against thresholds. Create `budget_exceeded` alerts (no auto-cancel).
+9. **Commit** — All changes from steps 3-8 go in a single `state-commit` transaction with `expected_revision` per file. On stale revision, re-read and retry.
+10. **Report** — Output a summary of recoveries, alerts, and escalations.
 
-If found:
-1. Read the pending transaction.
-2. Replay it with the `--replay` flag:
-   ```bash
-   cat .agent-atelier/.pending-tx.json | <plugin-root>/scripts/state-commit --root <repo-root> --replay
-   ```
-   The `--replay` flag handles partially applied transactions correctly: it skips files whose revision already matches the target (already written) and applies only the remaining files. This avoids the stale-revision false rejection that would occur with a normal commit.
-3. Report that a WAL recovery was performed, including which files were replayed vs skipped.
+After the report, the Orchestrator may respawn teammates, re-message owners, requeue WIs with unreachable owners, and re-dispatch recovered work.
 
-If not found, proceed normally.
+## Examples
 
-### 1. Read Current State
-
-Read these files:
-- `.agent-atelier/loop-state.json`
-- `.agent-atelier/work-items.json`
-- `.agent-atelier/watchdog-jobs.json`
-
-Note the timeout thresholds from `watchdog-jobs.json`:
-- `implementing_timeout_minutes`: 90 (default)
-- `candidate_timeout_minutes`: 30
-- `review_timeout_minutes`: 30
-- `gate_warn_after_hours`: 24
-
-### 2. Check for Stale Leases
-
-For each work item with status `implementing`:
-1. Parse `lease_expires_at`.
-2. If the lease has expired (current time > lease_expires_at):
-   - Set `status` → `ready`
-   - Clear `owner_session_id`, `last_heartbeat_at`, `lease_expires_at`
-   - Increment `stale_requeue_count`
-   - Set `last_requeue_reason` → `"watchdog: lease expired"`
-   - Bump the item's `revision`
-   - Record the recovery action
-
-If the lease is still valid, do not clear it here. Owner-session reachability is checked by the Orchestrator immediately after the tick during the recovery pulse.
-
-### 2b. Check for Stale Reviews
-
-For each work item with status `reviewing`:
-1. Parse `last_heartbeat_at` or the timestamp when status changed to `reviewing`.
-2. If elapsed time exceeds `review_timeout_minutes` (default 30):
-   - Set `status` → `ready`
-   - Set `last_requeue_reason` → `"watchdog: review timeout"`
-   - Increment `stale_requeue_count`
-   - Record the recovery action
-
-### 3. Check for Stale Candidates
-
-If `active_candidate_set` exists in loop state:
-- Read `active_candidate_set.activated_at` — this records when the candidate set entered the active slot.
-- If `activated_at` is missing or null, the state predates this field; fall back to the most recent `last_heartbeat_at` among referenced WIs, or flag for manual review if no timestamp exists.
-- Compare against `candidate_timeout_minutes` from watchdog defaults.
-- If stale:
-  - for every WI in `active_candidate_set.work_item_ids`, set `status` → `ready`
-  - clear promotion metadata (`candidate_branch`, `candidate_commit`, `promotion.status` → `not_ready`)
-  - clear `active_candidate_set`
-  - promote the next candidate set from `candidate_queue` only if the queue is non-empty and the watchdog can do so mechanically without changing FIFO order
-
-### 4. Check for Long-Open Gates
-
-Scan `.agent-atelier/human-gates/open/` for HDR files:
-- Parse `created_at`
-- If older than `gate_warn_after_hours`: add a warning alert
-
-### 5. Check for Repeated Failures
-
-For each work item, check `stale_requeue_count` and `last_finding_fingerprint`:
-- Same finding fingerprint 3+ times → flag for orchestrator review (something structural is wrong)
-- Same watchdog intervention 2+ times on one WI → flag for orchestrator review
-- Environment errors 2+ times → suggest environment escalation, not code retry
-
-### 6. Enforce Operating Budgets
-
-Read `budgets` from `watchdog-jobs.json`. For each non-`done` work item, check:
-
-- **Wall-clock time**: If `first_claimed_at` is set and `(now - first_claimed_at)` exceeds `max_wall_clock_minutes_per_wi` (default 480), create a `budget_exceeded` alert. The watchdog does NOT auto-cancel — it flags for orchestrator review.
-- **Handoff count**: If `handoff_count` exceeds `max_handoffs_per_wi` (default 6), flag for review. Excessive handoffs indicate decomposition problems.
-- **Watchdog interventions**: If `stale_requeue_count` exceeds `max_watchdog_interventions_per_wi` (default 3), escalate. The WI is repeatedly getting stuck.
-- **Attempt count**: If `attempt_count` exceeds `max_attempts_per_wi` (default 5), flag for review. The implementation approach likely needs rethinking.
-
-Budget alerts use the same alert structure as other watchdog alerts, with `type: "budget_exceeded"` and `message` indicating which budget was exceeded and by how much.
-
-### 7. Commit All Changes
-
-Gather all changes from steps 2-6 and commit them in a single state-commit transaction. This may include:
-- Updated `work-items.json` (recovered items)
-- Updated `loop-state.json` (cleared or advanced `active_candidate_set`)
-- Updated `watchdog-jobs.json` (last_tick_at, open_alerts, revision bump)
-
-All changes go in one transaction with `expected_revision` set for each file. If a revision is stale (another writer changed state between read and commit), the entire tick is rejected — re-read and retry.
-
-### 8. Report
-
-Output a summary:
-
+**Invocation (typical):**
 ```
-Watchdog tick at 2026-04-08T12:00:00Z
-
-Recovered:
-  WI-014: lease expired → requeued to ready (stale_requeue_count: 2)
-
-Alerts:
-  HDR-007: open for 36h — consider nudging the user
-
-Manual attention required:
-  WI-021: same finding fingerprint 3x — likely a structural issue
-
-No issues found: WI-010, WI-011, WI-013, WI-015, WI-018
+/agent-atelier:watchdog tick
 ```
 
-After returning this report, the Orchestrator may still take follow-up recovery actions in the same pulse:
-- respawn missing teammates
-- re-message reachable owners/reviewers/validators
-- requeue `implementing` WIs whose owner session no longer exists
-- re-dispatch recovered work
-
-## Alert Structure
-
-When creating an alert in `open_alerts`:
-
+**Clean tick (no issues):**
 ```json
-{
-  "id": "WDA-NNN",
-  "created_at": "<now>",
-  "type": "stale_lease | repeated_failure | long_open_gate | environment_error",
-  "work_item_id": "WI-NNN",
-  "message": "Human-readable description",
-  "action_taken": "requeued | escalated | none"
-}
+{"request_id": "REQ-WD-001", "accepted": true, "changed": false, "recovered": [], "alerts_created": [], "escalations": []}
+```
+
+**Tick with recovery:**
+```json
+{"request_id": "REQ-WD-002", "accepted": true, "changed": true, "tick_at": "2026-04-08T12:00:00Z",
+ "recovered": [{"work_item_id": "WI-014", "action": "requeued", "reason": "lease expired", "stale_requeue_count": 2}],
+ "alerts_created": [{"id": "WDA-003", "type": "long_open_gate", "work_item_id": "WI-012"}],
+ "escalations": []}
 ```
 
 ## Exit Codes
 
 | Code | Meaning |
 |------|---------|
-| `0` | Success — tick completed (with or without recovery actions) |
+| `0` | Tick completed (with or without recovery actions) |
 | `1` | Usage error (invalid arguments) |
 | `2` | Stale revision (another writer changed state between read and commit) |
 | `3` | State files not found (not initialized) |
@@ -190,55 +81,29 @@ When creating an alert in `open_alerts`:
 
 ## Input Conventions
 
-The `tick` subcommand takes no payload input. Optional flags:
-
-- `--request-id <id>` — unique request identifier for audit trail (recommended but optional for watchdog since tick is inherently idempotent)
+The `tick` subcommand takes no payload. Optional flag:
+- `--request-id <id>` — audit trail identifier (optional since tick is inherently idempotent)
 
 ## Output Contract
 
-Returns JSON to stdout:
-
-```json
-{
-  "request_id": "REQ-WD-001",
-  "accepted": true,
-  "committed_revision": 4,
-  "changed": true,
-  "tick_at": "2026-04-08T12:00:00Z",
-  "recovered": [
-    {"work_item_id": "WI-014", "action": "requeued", "reason": "lease expired", "stale_requeue_count": 2}
-  ],
-  "alerts_created": [
-    {"id": "WDA-003", "type": "long_open_gate", "work_item_id": "WI-012"}
-  ],
-  "escalations": [
-    {"work_item_id": "WI-021", "reason": "same finding fingerprint 3x"}
-  ],
-  "artifacts": [
-    ".agent-atelier/work-items.json",
-    ".agent-atelier/watchdog-jobs.json"
-  ]
-}
-```
-
-If no issues found: `"changed": false, "recovered": [], "alerts_created": [], "escalations": []`. When presenting to a human user, additionally render the readable summary format shown above. Diagnostic messages go to stderr.
+Returns JSON to stdout. See `reference/execution-details.md` for the full schema. When presenting to a human, also render a readable summary showing recovered items, alerts, escalations, and healthy items.
 
 ## Idempotency
 
-Watchdog `tick` is inherently idempotent — running it multiple times with the same state produces the same recovery actions. Already-recovered items will not be in the triggering state on re-run.
+Watchdog `tick` is inherently idempotent. Running it multiple times with the same state produces the same recovery actions. Already-recovered items will not be in the triggering state on re-run.
 
 ## Error Handling
 
 | Condition | Exit Code | Action |
 |-----------|-----------|--------|
 | State files missing | `3` | Suggest running `/agent-atelier:init` |
-| WI references non-existent gate | `0` | Log the inconsistency, suggest manual cleanup |
-| Watchdog encounters an error | `4` | Report and stop — never make partial writes |
-| Stale revision | `2` | Re-read and retry the entire tick |
+| WI references non-existent gate | `0` | Log inconsistency, suggest manual cleanup |
+| Runtime error during tick | `4` | Report and stop — never make partial writes |
+| Stale revision on commit | `2` | Re-read all state files and retry the entire tick |
 
 ## Constraints
 
 - All recovery actions are logged. The watchdog never silently changes state.
-- The watchdog acts on observed state only — it doesn't remember previous ticks or build up internal state across invocations.
+- The watchdog acts on observed state only — no memory across invocations.
 - When in doubt, escalate rather than recover. A stuck item that gets human attention is better than a recovered item that loses work.
-- The watchdog must not infer teammate liveness from lease state alone. Reachability checks belong to the Orchestrator's post-tick recovery sweep.
+- The watchdog must not infer teammate liveness from lease state. Reachability checks belong to the Orchestrator's post-tick recovery sweep.
