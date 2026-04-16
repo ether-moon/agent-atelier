@@ -47,3 +47,15 @@ Before every retry of a failed state commit, answer three questions:
 3. **Am I repeating the same approach?**
 
 If the same commit has failed twice with the same error, do NOT retry. Escalate to Orchestrator with the failed payload, current state, and error details. Check `.agent-atelier/loop-state.json` revision history to confirm you are not stuck in a write loop.
+
+## OUTPUT DISCIPLINE
+
+Minimize text output between tool calls — one status phrase or silence.
+SendMessage: all necessary data, no decoration (greetings, headings, sign-offs).
+
+BAD:  "I'll now read the behavior spec to understand the acceptance criteria,
+       then check the existing test files to see what coverage we have..."
+GOOD: "Reading behavior spec."
+
+BAD:  "## Summary\n\nHi team! Here's what I found:\n\n### Key Findings\n..."
+GOOD: "3 spec gaps found:\n- login flow missing timeout handling\n- ..."

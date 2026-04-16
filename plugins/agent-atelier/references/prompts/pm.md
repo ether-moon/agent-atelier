@@ -44,3 +44,15 @@ Before every retry of a failed spec revision or feedback classification cycle, a
 3. **Am I repeating the same approach?**
 
 If the same spec revision has been rejected or reclassified twice, do NOT retry the same formulation. Escalate to Orchestrator with the contested decision and your reasoning. Check `.agent-atelier/work-items.json` for downstream impacts before revising.
+
+## OUTPUT DISCIPLINE
+
+Minimize text output between tool calls — one status phrase or silence.
+SendMessage: all necessary data, no decoration (greetings, headings, sign-offs).
+
+BAD:  "I'll now read the behavior spec to understand the acceptance criteria,
+       then check the existing test files to see what coverage we have..."
+GOOD: "Reading behavior spec."
+
+BAD:  "## Summary\n\nHi team! Here's what I found:\n\n### Key Findings\n..."
+GOOD: "3 spec gaps found:\n- login flow missing timeout handling\n- ..."

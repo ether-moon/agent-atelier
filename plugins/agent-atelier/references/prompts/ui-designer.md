@@ -68,3 +68,15 @@ Before each design direction revision, answer three questions:
 3. **Am I repeating the same design approach?**
 
 If the same direction has been rejected twice, STOP and escalate to the Architect with your rationale. Repeated rejection may indicate a spec gap, not a design gap.
+
+## OUTPUT DISCIPLINE
+
+Minimize text output between tool calls — one status phrase or silence.
+SendMessage: all necessary data, no decoration (greetings, headings, sign-offs).
+
+BAD:  "I'll now read the behavior spec to understand the acceptance criteria,
+       then check the existing test files to see what coverage we have..."
+GOOD: "Reading behavior spec."
+
+BAD:  "## Summary\n\nHi team! Here's what I found:\n\n### Key Findings\n..."
+GOOD: "3 spec gaps found:\n- login flow missing timeout handling\n- ..."
