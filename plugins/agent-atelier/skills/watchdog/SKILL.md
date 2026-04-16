@@ -8,12 +8,15 @@ argument-hint: "[tick]"
 
 The watchdog exists because agent sessions can crash, time out, or simply disappear. Without cleanup, work items would stay in `implementing` forever with expired leases, blocking progress. The watchdog detects these situations and takes safe, mechanical recovery actions.
 
+In the long-running loop, watchdog `tick` is the mechanical half of a larger 15-minute recovery pulse. The follow-up teammate respawn, owner reachability check, and work re-dispatch are Orchestrator responsibilities after the tick completes successfully.
+
 ## When This Skill Runs
 
 - Routine health check (recommended: at start of each orchestrator session)
 - After a session crash or unexpected termination
 - When the user suspects something is stuck
 - Periodically during long-running orchestration loops
+- As the first step of the independent 15-minute recovery pulse created by `/agent-atelier:run`
 
 ## Prerequisites
 
@@ -33,6 +36,8 @@ The watchdog performs ONLY mechanical, reversible recovery. It never:
 - Makes product decisions (promoting the next candidate from `candidate_queue` is mechanical — the queue order was already decided by the Orchestrator)
 
 If something requires judgment, the watchdog escalates to the orchestrator.
+
+The watchdog also does not decide whether a still-valid lease holder is reachable. If a WI remains `implementing` with an unexpired lease, the watchdog leaves it alone; the Orchestrator's recovery pulse may still reclaim it immediately if the recorded owner session no longer exists.
 
 ## Execution Steps
 
@@ -75,6 +80,8 @@ For each work item with status `implementing`:
    - Set `last_requeue_reason` → `"watchdog: lease expired"`
    - Bump the item's `revision`
    - Record the recovery action
+
+If the lease is still valid, do not clear it here. Owner-session reachability is checked by the Orchestrator immediately after the tick during the recovery pulse.
 
 ### 2b. Check for Stale Reviews
 
@@ -145,6 +152,12 @@ Manual attention required:
 
 No issues found: WI-010, WI-011, WI-013, WI-015, WI-018
 ```
+
+After returning this report, the Orchestrator may still take follow-up recovery actions in the same pulse:
+- respawn missing teammates
+- re-message reachable owners/reviewers/validators
+- requeue `implementing` WIs whose owner session no longer exists
+- re-dispatch recovered work
 
 ## Alert Structure
 
@@ -224,3 +237,4 @@ Watchdog `tick` is inherently idempotent — running it multiple times with the 
 - All recovery actions are logged. The watchdog never silently changes state.
 - The watchdog acts on observed state only — it doesn't remember previous ticks or build up internal state across invocations.
 - When in doubt, escalate rather than recover. A stuck item that gets human attention is better than a recovered item that loses work.
+- The watchdog must not infer teammate liveness from lease state alone. Reachability checks belong to the Orchestrator's post-tick recovery sweep.

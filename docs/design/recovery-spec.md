@@ -2,7 +2,7 @@
 
 **Date**: 2026-04-08
 **Status**: Draft v1
-**Scope**: Crash recovery, watchdog recovery, and completion safety
+**Scope**: Crash recovery, session-limit recovery, watchdog recovery, and completion safety
 
 ---
 
@@ -31,6 +31,7 @@ Recovery goals:
 | Gate left open too long | HDR open for 24h | No | Alert only |
 | Stale state update | Old revision tries to mutate state | Yes | Reject request |
 | Session crash | Process exits mid-WI | Yes | Resume from disk and git |
+| Session/rate limit stall | Claude rejects prompts temporarily | Partial | Wait for watchdog recovery pulse; if lead is gone, cold resume |
 | Product ambiguity | Recovery requires product judgment | No | Human gate or Orchestrator review |
 
 ---
@@ -55,9 +56,29 @@ Watchdog must not:
 - resolve human gates
 - invent validation results
 
+Watchdog is only the mechanical half of the 15-minute recovery pulse. Teammate respawn, owner reachability checks, and work re-dispatch remain the Orchestrator's responsibility after the tick completes.
+
 ---
 
-## 4. Cold Resume Algorithm
+## 4. Session-Limit Recovery
+
+Session/rate-limit recovery is intentionally lightweight:
+
+1. do not persist a dedicated paused mode
+2. let the stalled turn fail naturally
+3. rely on an already-created 15-minute watchdog recovery cron to try again when the lead session is idle and promptable
+4. after a successful `watchdog tick`, the Orchestrator runs a resume sweep:
+   - respawn missing teammates required by the current mode
+   - resume `ready` work through normal dispatch
+   - recontact `implementing` owners that still exist
+   - immediately requeue `implementing` WIs whose recorded owner session no longer exists, rather than waiting for lease expiry
+   - resume active validation/review with fresh specialists if needed
+
+If the lead session is gone before that recovery pulse can fire, session-limit recovery does not apply; use cold resume instead.
+
+---
+
+## 5. Cold Resume Algorithm
 
 When the runtime starts after interruption:
 
@@ -68,12 +89,15 @@ When the runtime starts after interruption:
 5. inspect work items for expired leases
 6. inspect git branches / worktrees for committed candidate state
 7. apply mechanical recovery where allowed
-8. emit a resume summary
-9. let Orchestrator choose the next action from the recovered state
+8. start `/agent-atelier:run`, which recreates the monitor poll cron, the watchdog recovery cron, and one startup resume sweep over the recovered state
+9. emit a resume summary
+10. let Orchestrator choose the next action from the recovered state
+
+Cold resume is distinct from session-limit recovery: teammate sessions from the previous runtime are gone. A still-valid `implementing` lease therefore does not authorize resuming the old owner. The startup resume sweep must reclaim stranded `implementing` WIs immediately rather than waiting for lease expiry.
 
 ---
 
-## 5. Completion Safety
+## 6. Completion Safety
 
 `done` is allowed only if all are true:
 
@@ -88,7 +112,7 @@ If any condition fails, completion must be rejected.
 
 ---
 
-## 6. Repeated-Failure Policy
+## 7. Repeated-Failure Policy
 
 ### Finding Fingerprints
 
@@ -106,7 +130,7 @@ Each repeated failure should be normalized into a stable fingerprint such as:
 
 ---
 
-## 7. Human Gate Recovery
+## 8. Human Gate Recovery
 
 Human gates are durable by file, so recovery is simple:
 
@@ -118,7 +142,7 @@ Automation may never close or answer a gate.
 
 ---
 
-## 8. Evidence Retention
+## 9. Evidence Retention
 
 Recovery depends on durable evidence. Implementations must not delete:
 
@@ -135,7 +159,7 @@ Cleanup is allowed only for:
 
 ---
 
-## 9. Recovery Output
+## 10. Recovery Output
 
 Every watchdog tick or cold resume should emit a machine-readable summary:
 
@@ -160,7 +184,7 @@ This makes recovery auditable and testable.
 
 ---
 
-## 10. Test Scenarios
+## 11. Test Scenarios
 
 At minimum, the runtime must be tested against:
 
@@ -171,3 +195,5 @@ At minimum, the runtime must be tested against:
 5. open gate survives full restart
 6. stale `based_on_revision` request is rejected
 7. cold resume reconstructs next action from disk only
+8. session-limit stall recovers on the next watchdog recovery pulse without user input
+9. unreachable `implementing` owner is requeued before lease expiry during recovery

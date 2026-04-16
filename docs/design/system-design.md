@@ -58,7 +58,7 @@ An **autonomous product development loop** — not just "an implementation agent
 | Multi-writer shared state | State Manager single writer for `.agent-atelier/**` | Deterministic recovery and race-free state commits |
 | Validation informed by builder narrative | WI/spec-derived VRM prompt builder | Prevents confirmation bias in validation |
 | Ad hoc reviewer discussion | Independent first pass + PM-led synthesis | Preserves reviewer independence before debate |
-| No long-loop monitor | Watchdog over persisted orchestration state | Detects stale gates, stalled WIs, and missing handoffs |
+| No long-loop monitor | Two-lane observation + recovery (`*/2` monitor poll + `*/15` watchdog pulse) | Fast event handling plus durable mechanical recovery without relying on chat memory |
 | "20% change" threshold | Irreversibility + blast radius criteria | Mechanical, unambiguous gate criteria |
 | Specialization-framed roles | Focus-framed roles | All agents are generalists; roles constrain attention, not capability |
 | Token efficiency as driver | Quality as driver | Quality output is the goal; efficiency is a welcome side effect |
@@ -1360,6 +1360,7 @@ V1 transport decision: use `write()` plus persisted JSON artifacts first. Do not
 ### Watchdog
 
 - The `watchdog` skill reads persisted orchestration state, performs limited safe recovery, and emits alerts for anything requiring judgment; it never edits product code or product specs
+- In the running system, `watchdog tick` is only the mechanical half of recovery. The Orchestrator follows it with teammate respawn, reachability checks, and work re-dispatch.
 - Minimum checks:
   - open human gate exceeds threshold
   - `implementing` WI shows no artifact updates within threshold
@@ -1371,6 +1372,7 @@ V1 transport decision: use `write()` plus persisted JSON artifacts first. Do not
   - demote stale `active_candidate` entries back to `candidate_queue`
   - reject completion records that lack required evidence references
   - escalate repeated fingerprints or repeated watchdog interventions to Orchestrator
+- Reachability of a still-valid `implementing` owner is not decided by the watchdog. The Orchestrator may still reclaim that WI immediately during a recovery sweep if the recorded owner session no longer exists.
 - Watchdog alerts and recovery records route to Orchestrator through State Manager commits
 
 ### Watchdog Default Thresholds (Loose v1)
@@ -1385,7 +1387,7 @@ These defaults are intentionally forgiving. They should restore obviously stale 
 | Evidence bundle exists with no first-pass review or synthesis activity | 30 minutes | Re-dispatch synthesis request, warn Orchestrator |
 | Same watchdog alert repeats twice | Next check cycle | Raise severity and require Orchestrator root-cause review |
 
-Watchdog recovery is intentionally narrow: it may auto-transition orchestration state when the recovery is mechanical and reversible, but it must not rewrite specs, code, or human decisions.
+Watchdog recovery is intentionally narrow: it may auto-transition orchestration state when the recovery is mechanical and reversible, but it must not rewrite specs, code, or human decisions. The broader recovery contract is two-step: mechanical watchdog tick first, then an Orchestrator resume sweep.
 
 ### Builder Isolation via Git Worktrees
 
@@ -1410,7 +1412,7 @@ Agent Teams cannot restore teammates on session resume. Recovery relies on **com
 2. Builders produce atomic commits — every meaningful work unit is committed
 3. Each failed or interrupted WI attempt records hypothesis, repro steps, commands run, touched paths, and failing checks in an attempt journal committed by State Manager
 4. Uncommitted code in worktrees is discardable because operational knowledge survives in the attempt journal
-5. New session: read `loop-state.json`, `work-items.json`, open HDRs, attempt journals, and `git log` → identify last committed checkpoint → spawn fresh team → reset incomplete WIs to `pending` or their recorded resume target → resume
+5. New session: read `loop-state.json`, `work-items.json`, open HDRs, attempt journals, and `git log` → identify last committed checkpoint → start `/agent-atelier:run` → recreate fresh monitors and both orchestration cron jobs → run one startup resume sweep that immediately requeues stranded `implementing` WIs from the crashed runtime and resumes validation/review from disk → resume
 
 Git workflow principles: trunk-based development, atomic commits (~100 lines), commit-as-savepoint pattern.
 

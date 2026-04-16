@@ -28,8 +28,8 @@ This skill starts the full autonomous development loop. It spawns the agent team
 
 1. **Read state.** Load `.agent-atelier/loop-state.json`, `.agent-atelier/work-items.json`, `.agent-atelier/watchdog-jobs.json`.
 2. **WAL recovery.** If `.agent-atelier/.pending-tx.json` exists, replay it first (see `references/recovery-protocol.md`).
-3. **Check for stale work.** Run a watchdog tick to recover any stale leases or candidates from a previous session.
-4. **Report current state.** Show the user a status dashboard before proceeding.
+3. **Check for stale work.** Run a watchdog tick to recover any stale leases or candidates from a previous session. This is the mechanical half only — still-valid `implementing` leases from a crashed runtime are reclaimed later by the startup resume sweep after the core team exists again.
+4. **Prepare the status snapshot.** Do not present the startup dashboard yet if recovery is in progress; show it after the startup resume sweep so the user sees recovered state rather than stale ownership.
 
 ## Phase 2: Spawn Team
 
@@ -145,10 +145,31 @@ When conditional specialists are spawned (Builder, VRM, reviewers), include the 
 After spawning the team, start background monitors for continuous state observation:
 
 1. **Spawn monitors.** Invoke `/agent-atelier:monitors spawn` — returns a JSON mapping of monitor names to background task IDs (heartbeat, gate, events, divergence).
-2. **Create poll job.** Use `CronCreate` with cron `"*/2 * * * *"` (fires roughly every 2 minutes when idle). The prompt should invoke `/agent-atelier:monitors check` with the task ID mapping and follow the response protocol documented in the monitors skill.
-3. **Store handles.** Keep the CronCreate job ID and the task ID mapping in conversation context for later cleanup. These are session-scoped — they do not survive restarts.
+2. **Create monitor poll job.** Use `CronCreate` with cron `"*/2 * * * *"` (fires roughly every 2 minutes when idle). The prompt should invoke `/agent-atelier:monitors check` with the task ID mapping and follow the response protocol documented in the monitors skill.
+3. **Create watchdog recovery job.** Use `CronCreate` with cron `"*/15 * * * *"` (fires roughly every 15 minutes when idle). The prompt should:
+   - invoke `/agent-atelier:watchdog tick`
+   - re-read `loop-state.json` and `work-items.json`
+   - run the Orchestrator resume sweep for teammate respawn, work re-dispatch, and early recovery of unreachable owners
+   - stay silent if no recovery or dispatch action is needed
+4. **Store handles.** Keep both CronCreate job IDs and the task ID mapping in conversation context for later cleanup. These are session-scoped — they do not survive restarts.
 
 The monitors provide early warning (10–60 second detection) while the watchdog provides mechanical recovery (15-minute ticks). Both layers operate concurrently.
+
+### Startup Resume Sweep (Run Once After Team Spawn)
+
+After the core team and monitor infrastructure are restored, run one immediate resume sweep before entering the steady-state loop. This sweep is required on every `/agent-atelier:run`; on a clean start it should be a no-op.
+
+1. Re-read `loop-state.json` and `work-items.json`.
+2. Apply the same routing rules as the watchdog recovery pulse, with one cold-resume override:
+   - any WI that was already `implementing` when this `/run` invocation began is presumed stranded from the previous runtime
+   - reclaim it immediately through State Manager with reason `cold-resume: owner session unavailable`
+   - do not wait for lease expiry
+3. Resume other recoverable work from durable state:
+   - `ready` → follow the normal Builder claim and dispatch flow
+   - `active_candidate` / `candidate_validating` → re-message a reachable VRM or spawn a fresh VRM and continue validation without demotion
+   - `reviewing` → re-message reachable reviewers or respawn them from persisted review artifacts
+   - if CI was already running for the active candidate, recreate the ci-status monitor if needed
+4. Only after this sweep completes, present the startup status dashboard and continue into the normal orchestration loop.
 
 ### Active Worktree Hygiene
 
@@ -281,7 +302,7 @@ All WIs complete with evidence. Execute the team cleanup checklist in order:
 
 1. **Verify completion:** Confirm all WIs have status `done` and `active_candidate` is null.
 2. **Stop monitors:** Stop all monitors via `/agent-atelier:monitors stop all`.
-3. **Cancel poll job:** `CronDelete` with the stored job ID.
+3. **Cancel cron jobs:** `CronDelete` both the stored monitor poll job ID and the stored watchdog recovery job ID.
 4. **Shutdown teammates:** Send `SendMessage({type: "shutdown_request"})` to each active teammate. Wait for all to reach idle/stopped state.
 5. **Clean up team:** Call `TeamDelete` to remove team resources. **Only the lead (Orchestrator) may run cleanup** — teammates running cleanup can leave resources inconsistent.
 6. **Report results and recommend next step:** Present a concise completion report followed by one recommended action.
@@ -304,7 +325,7 @@ After executing the cleanup checklist, verify each step actually succeeded befor
 
 **Primary success conditions** (all must pass):
 1. Re-read `work-items.json` — confirm zero non-`done` items and `active_candidate` is null.
-2. Call `CronList` — confirm no remaining orchestration poll jobs. If any exist, `CronDelete` them.
+2. Call `CronList` — confirm no remaining orchestration cron jobs (monitor poll or watchdog recovery). If any exist, `CronDelete` them.
 3. Team cleanup completed successfully — the lead executed cleanup and no active teammates remain.
 
 **Secondary confirmation** (informational, not blocking):
@@ -336,13 +357,24 @@ The poll job created in Phase 2 fires when the REPL is idle. On each tick:
 4. **Dead monitors** — re-spawn via `/agent-atelier:monitors spawn`. If same monitor has died 3+ times, escalate to user.
 5. **Silent ticks.** If the check report contains 0 IMMEDIATE events, 0 WARNING events, 0 dead monitors, and no state changes since the last tick — produce no user-visible output. The Orchestrator should not print "all healthy, 0 events" messages. Only report when there is something to act on or escalate.
 
-### Watchdog Ticks (Every 15 Minutes or at Phase Transitions)
+### Watchdog Recovery Pulse (Every ~15 Minutes or at Phase Transitions)
 
-Run `/agent-atelier:watchdog tick` for mechanical recovery independent of monitors:
-- Stale lease requeue
-- Expired candidate clearing and next-candidate promotion
-- Budget enforcement
-- Long-open gate warnings
+The watchdog recovery job created in Phase 2 fires when the REPL is idle. On each pulse:
+
+1. Invoke `/agent-atelier:watchdog tick` for mechanical recovery:
+   - stale lease requeue
+   - expired candidate clearing and next-candidate promotion
+   - budget enforcement
+   - long-open gate warnings
+2. Immediately run an Orchestrator resume sweep:
+   - respawn missing core teammates required by the current mode
+   - dispatch Builders for `ready` WIs
+   - for `implementing` WIs, message the recorded owner if still reachable; if the owner session no longer exists, requeue immediately and dispatch a fresh Builder instead of waiting for lease expiry
+   - for `active_candidate`, resume with the current VRM if reachable or spawn a fresh VRM if not
+   - for `reviewing` WIs, re-message or re-spawn reviewers as needed
+3. **Silent pulses.** If the watchdog reports no recovery and the resume sweep performs no respawn, requeue, dispatch, or user-facing escalation, produce no visible output.
+
+The startup resume sweep described in Phase 2 uses the same rules, except that any WI already in `implementing` when `/run` starts after a crash is presumed stranded and reclaimed immediately.
 
 ### CI Monitor (On-Demand)
 
@@ -395,9 +427,11 @@ Returns JSON to stdout on completion:
 - If a teammate crashes: the watchdog detects stale leases and recovers mechanically
 - If the loop gets stuck: budget checks flag it before it becomes a problem
 - If a WI fails repeatedly (3x same fingerprint): escalate to human review
-- If the user interrupts: save state, requeue active work, stop monitors, cancel poll job, report status
+- If the user interrupts: save state, requeue active work, stop monitors, cancel both cron jobs, report status
 - If a monitor crashes: CronCreate polling detects it via dead-monitor report → orchestrator re-spawns
 - If same monitor crashes 3+ times in a session: escalate to user instead of retrying
+- If a session/rate limit temporarily stalls the team but the lead survives: the next watchdog recovery pulse re-runs mechanical recovery and the Orchestrator resume sweep without human input
+- If the lead dies before cron jobs exist or can fire: use cold resume (`references/recovery-protocol.md`), then let `/run` recreate runtime infrastructure and perform the startup resume sweep instead of relying on the next 15-minute pulse
 
 ## Constraints
 
