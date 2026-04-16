@@ -69,18 +69,14 @@ with open(sys.argv[1]) as f:
 " "$LOOP_STATE" 2>/dev/null || echo "")
 fi
 
-# Fallback: search for any agent-atelier-* team directory
+# Fallback: derive expected team name for current repo (matches run skill logic)
 if [[ -z "$TEAM_NAME" ]]; then
   TEAMS_BASE="$HOME/.claude/teams"
-  if [[ -d "$TEAMS_BASE" ]]; then
-    shopt -s nullglob
-    for d in "$TEAMS_BASE"/agent-atelier-*; do
-      if [[ -d "$d" ]]; then
-        TEAM_NAME=$(basename "$d")
-        break
-      fi
-    done
-    shopt -u nullglob
+  base=$(basename "$ROOT" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_-' '-' | sed 's/-\{2,\}/-/g; s/^-//; s/-$//' | cut -c1-20)
+  hash=$(printf '%s' "$ROOT" | shasum -a 256 | cut -c1-8)
+  candidate="atelier-${base}-${hash}"
+  if [[ -d "$TEAMS_BASE/$candidate" ]]; then
+    TEAM_NAME="$candidate"
   fi
 fi
 

@@ -407,7 +407,7 @@ Experimental feature (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`). Requires Opus 4
 
 ### 5.1 Team Definition & Spawning
 
-Teammates are spawned via natural language prompts, not pre-defined config files. The lead calls `spawnTeam` then spawns teammates via `Agent(team_name=...)`.
+Teammates are spawned via natural language prompts, not pre-defined config files. The lead calls `TeamCreate` then spawns teammates via `Agent(team_name=...)`.
 
 **Custom `.claude/agents/` files CAN be used as `subagent_type`**, but with significant limitations (GitHub Issue #30703):
 
@@ -426,9 +426,9 @@ Teammates are spawned via natural language prompts, not pre-defined config files
 
 | Operation | Purpose |
 |-----------|---------|
-| `spawnTeam` | Create team, write config to `~/.claude/teams/{name}/config.json` |
+| `TeamCreate` | Create team, write config to `~/.claude/teams/{name}/config.json` |
 | `discoverTeams` | Find existing teams |
-| `cleanup` | Remove team resources (fails if members still active) |
+| `TeamDelete` | Remove team resources (fails if members still active) |
 | `write` | Direct message to one teammate |
 | `broadcast` | Message all teammates (cost scales with N) |
 | `requestJoin` | Request to join team |
@@ -476,12 +476,12 @@ Teammates are spawned via natural language prompts, not pre-defined config files
 ### 5.5 Team Lifecycle
 
 ```
-1. spawnTeam → creates config.json + task dirs + inbox dirs
+1. TeamCreate → creates config.json + task dirs + inbox dirs
 2. TaskCreate → define work items with dependencies
 3. Agent(team_name=..., run_in_background=true) → spawn teammates
 4. Teammates poll TaskList → claim → execute → mark complete → message lead
 5. requestShutdown → approve/reject
-6. cleanup → remove team resources
+6. TeamDelete → remove team resources
 ```
 
 **Team config:**
@@ -557,11 +557,11 @@ Force via: `export CLAUDE_CODE_SPAWN_BACKEND=tmux|in-process`
 
 | Aspect | Subagents | Agent Teams |
 |--------|-----------|-------------|
-| Invocation | `Agent(subagent_type=...)` | `spawnTeam` + `Agent(team_name=...)` |
+| Invocation | `Agent(subagent_type=...)` | `TeamCreate` + `Agent(team_name=...)` |
 | Context | Results return to caller | Fully independent |
 | Communication | Report to parent only | Peer-to-peer mailbox |
 | Coordination | Parent manages all | Shared task list, self-coordination |
-| Lifecycle | Per-invocation (can resume) | Persistent until shutdown+cleanup |
+| Lifecycle | Per-invocation (can resume) | Persistent until shutdown+TeamDelete |
 | Nesting | Cannot spawn subagents | Cannot spawn teams |
 | Task system | None (parent tracks) | Built-in TaskCreate/Update/List/Get |
 | Messaging | None between subagents | write/broadcast/structured messages |
