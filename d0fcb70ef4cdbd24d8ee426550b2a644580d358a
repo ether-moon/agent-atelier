@@ -1,0 +1,28 @@
+## Decisions Made
+- Two-tier state: verb mode for data-plane, SM for control-plane — eliminates ~22 SM roundtrip turns per session
+- Patch/verb over file-split: peer review recommended verb field whitelists instead of per-field file separation
+- Fate-sharing for batch candidates: validation failure demotes ALL WIs atomically, no partial recovery
+- Pre-WAL dependency computation: resolved before WAL write to ensure replay determinism
+- Complexity default null instead of "simple": forces Architect to explicitly assess every WI
+- Verify hard gate at BUILD_PLAN→IMPLEMENT boundary: prevents empty-verify WIs from entering implementation
+
+## Problems Encountered
+- Context compaction mid-implementation: session ran out of context after Step 5, resumed via cold summary. No state lost — all edits persisted on disk.
+- Existing test fixtures used old `active_candidate`/`candidate_activated_at` fields: updated all test fixtures to use `active_candidate_set`/`candidate_queue`.
+
+## Constraints Identified
+- Verb whitelist must be hardcoded: adding new verbs requires code change to state-commit, not configuration
+- Fast-track is per-batch conservative: ALL WIs in a set must meet all 4 conditions
+- depends_on is immutable after initial upsert: prevents dependency drift since Agent Teams API lacks `removeBlockedBy`
+
+## Open Questions
+- None — all design decisions were resolved during peer review phase
+
+## Context
+Implemented Orchestration Model v0.2 across 15 files, addressing 6 feedback items from v0.1.3 field usage. Core changes to state-commit (verb mode, dependency resolver, cycle detection), candidate/validate/execute skills (batch candidate_set lifecycle), run/SKILL.md (fast-track review, verify gate), and role prompts (orchestrator, architect, state-manager). All 60 mutation flow tests pass including 12 new v0.2-specific assertions.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
