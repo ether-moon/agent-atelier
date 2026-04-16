@@ -248,7 +248,7 @@ This diagram shows the **dominant control flow for an unblocked work item**, not
 
 The workflow uses a **two-tier state model**:
 
-- `loop-state.json` stores the control plane: current operating mode, active roles, open gates, the single active candidate, the FIFO candidate queue, and the current revision.
+- `loop-state.json` stores the control plane: current operating mode, active roles, open gates, the single active candidate set, the FIFO candidate queue, and the current revision.
 - `work-items.json` stores WI-level lifecycle state: `pending`, `ready`, `implementing`, `candidate_queued`, `candidate_validating`, `reviewing`, `blocked_on_human_gate`, `done`.
 - `HUMAN_GATE` is **not** a global phase. It is a WI-level blocked condition recorded as `blocked_by_gate` on the affected WI(s).
 - `State Manager` is the sole writer for `.agent-atelier/**`. All state changes are requested asynchronously and committed synchronously via `intent → validate → commit → ack`.
@@ -302,7 +302,7 @@ The workflow uses a **two-tier state model**:
 - **Rules**:
   - VRM input is assembled by a prompt builder from the work item, Behavior Spec, and verification commands only
   - Builder summaries, diffs, and "what changed" explanations are excluded from VRM input
-  - Validation runs only for the `active_candidate` selected by Orchestrator and committed by State Manager
+- Validation runs only for the `active_candidate_set` selected by Orchestrator and committed by State Manager
   - If other WIs become candidate-ready while validation is running, they enter `candidate_queued` and are appended to the FIFO `candidate_queue`
 - **Output**: Evidence bundle at `.agent-atelier/validation/{date}-run-{n}/`, candidate validation status
 
@@ -621,7 +621,7 @@ plugins/agent-atelier/
 │   └── run/SKILL.md               # Orchestration loop entry point (team spawn & lifecycle)
 ├── hooks/
 │   ├── hooks.json                 # Hook registrations (UserPromptSubmit, PreToolUse, Stop, SubagentStop)
-│   ├── on-prompt.sh               # UserPromptSubmit hook (signal collector: open gates, active_candidate, pending WAL)
+│   ├── on-prompt.sh               # UserPromptSubmit hook (signal collector: open gates, active_candidate_set, pending WAL)
 │   ├── on-pre-tool-use.sh         # Destructive command blocking
 │   ├── on-task-completed.sh       # Minimum evidence validation
 │   └── on-stop.sh                 # Dangling obligation check
@@ -661,7 +661,7 @@ The control plane uses two persistent layers:
 - `work-items.json` = WI-level lifecycle and blocking state
 
 All writes to `.agent-atelier/**` are serialized through the State Manager.
-Promotion policy is `single active candidate + FIFO queue`.
+Promotion policy is `single active candidate set + FIFO queue`.
 
 Section 8 is the architectural overview. Exact runtime contracts for implementation live in:
 
@@ -679,16 +679,22 @@ Section 8 is the architectural overview. Exact runtime contracts for implementat
   "active_spec": "docs/product/behavior-spec.md",
   "active_spec_revision": 7,
   "open_gates": ["HDR-002"],
-  "active_candidate": {
-    "work_item_id": "WI-014",
+  "active_candidate_set": {
+    "id": "CS-003",
+    "work_item_ids": ["WI-014", "WI-021"],
     "branch": "candidate/WI-014",
-    "commit": "abc1234"
+    "commit": "abc1234",
+    "type": "batch",
+    "activated_at": "2026-04-08T14:10:00Z"
   },
   "candidate_queue": [
     {
-      "work_item_id": "WI-021",
+      "id": "CS-004",
+      "work_item_ids": ["WI-022"],
       "branch": "candidate/WI-021",
-      "commit": "def5678"
+      "commit": "def5678",
+      "type": "single",
+      "activated_at": null
     }
   ],
   "next_action": {
@@ -1035,7 +1041,7 @@ Everything else should default to accept-and-ack rather than over-policing the l
   "recovery_action": {
     "type": "demote_candidate_to_queue",
     "performed": true,
-    "details": "Removed WI-021 from active_candidate and re-queued it for the next validation slot."
+    "details": "Removed CS-004 from active_candidate_set and re-queued it for the next validation slot."
   },
   "notify_role": "orchestrator"
 }
@@ -1109,7 +1115,7 @@ FOCUS:
 - Validate that incoming work-item proposals still match the latest `behavior_spec_revision`
 - Enforce `intent -> validate -> commit -> ack`
 - Keep `HUMAN_GATE` as a WI-level blocked condition, not a global phase
-- Maintain exactly one `active_candidate` plus a FIFO `candidate_queue`
+- Maintain exactly one `active_candidate_set` plus a FIFO `candidate_queue`
 - Maintain attempt journals and finding fingerprints for crash recovery
 - Commit watchdog alerts and watchdog job state
 
@@ -1341,7 +1347,7 @@ Orchestrator coordinates dialogue turns where synchronization matters (e.g., SPE
 
 All changes to `.agent-atelier/**` go through a request/ack pattern with the State Manager. Other roles never assume a state transition succeeded until the State Manager replies with the committed revision.
 
-Candidate promotion is also serialized through this channel. When multiple WIs reach `candidate_validating`, State Manager maintains one `active_candidate` and a FIFO `candidate_queue`; VRM validates only the active candidate.
+Candidate promotion is also serialized through this channel. When multiple WIs reach `candidate_validating`, State Manager maintains one `active_candidate_set` and a FIFO `candidate_queue`; VRM validates only the active candidate set.
 
 V1 transport decision: use `write()` plus persisted JSON artifacts first. Do not block initial implementation on custom MCP tooling unless the pilot shows the message volume is unmanageable.
 
@@ -1369,7 +1375,7 @@ V1 transport decision: use `write()` plus persisted JSON artifacts first. Do not
 - Recovery scope:
   - expire stale WI leases and return the WI to `ready`
   - auto-requeue stalled implementation work
-  - demote stale `active_candidate` entries back to `candidate_queue`
+  - demote stale `active_candidate_set` entries back to `candidate_queue`
   - reject completion records that lack required evidence references
   - escalate repeated fingerprints or repeated watchdog interventions to Orchestrator
 - Reachability of a still-valid `implementing` owner is not decided by the watchdog. The Orchestrator may still reclaim that WI immediately during a recovery sweep if the recorded owner session no longer exists.
@@ -1383,7 +1389,7 @@ These defaults are intentionally forgiving. They should restore obviously stale 
 |---|---|---|
 | Open human gate with no update | 24 hours | Warn Orchestrator |
 | `implementing` WI with no new attempt journal, commit, or state ack | 90 minutes | Expire lease, move WI to `ready`, increment `stale_requeue_count`, warn Orchestrator |
-| `active_candidate` with no VRM run started | 30 minutes | Demote candidate to `candidate_queue`, clear `active_candidate`, warn Orchestrator |
+| `active_candidate_set` with no VRM run started | 30 minutes | Demote candidate set to `candidate_queue`, clear `active_candidate_set`, warn Orchestrator |
 | Evidence bundle exists with no first-pass review or synthesis activity | 30 minutes | Re-dispatch synthesis request, warn Orchestrator |
 | Same watchdog alert repeats twice | Next check cycle | Raise severity and require Orchestrator root-cause review |
 
@@ -1396,7 +1402,7 @@ Each Builder works in an independent git worktree rather than sharing the main w
 - **Spawn**: `git worktree add` creates an isolated copy for each Builder
 - **Implement**: Builder works freely — no file conflict by design
 - **Commit**: Atomic commits (~100 lines) in the worktree branch
-- **Candidate merge**: Orchestrator dynamically decides candidate merge timing based on WI completion and dependency order. Orchestrator triggers merge, delegates conflict resolution to Architect, and State Manager records the result as either `active_candidate` or an entry in the FIFO `candidate_queue`.
+- **Candidate merge**: Orchestrator dynamically decides candidate merge timing based on WI completion and dependency order. Orchestrator triggers merge, delegates conflict resolution to Architect, and State Manager records the result as either `active_candidate_set` or an entry in the FIFO `candidate_queue`.
 - **Conflict resolution**: Architect handles merge conflicts in a dedicated integration worktree (not directly on `main`). Architect merges Builder branch into a candidate branch → resolves conflicts → runs smoke test. For trivial conflicts, Architect resolves directly. For complex conflicts, Architect consults relevant Builder(s).
 - **Authoritative validation before promotion**: Orchestrator spawns VRM on the candidate branch. Only after VRM evidence passes REVIEW_SYNTHESIS does Orchestrator promote the candidate to `main`.
 - **Failure containment**: If candidate validation fails, AUTOFIX resumes from the candidate branch and `main` remains unchanged.
@@ -1425,10 +1431,10 @@ All hooks must be defined at the project level since Agent Teams ignores per-age
 | `UserPromptSubmit` | Inject orchestration context before each prompt | Stdout = prepended context | Claude Code CLI |
 | `PreToolUse` | Block destructive commands, schema migrations, external deployments | Exit code 2 = block + feedback | Claude Code CLI |
 | `Stop` / `SubagentStop` | Prevent termination with critical tasks remaining | Exit code 2 = block exit | Claude Code CLI |
-| `TaskCompleted` | Reject task completion without tests/lint/evidence | Exit code 2 = reject completion | Agent SDK only — not available in Claude Code CLI |
-| `TeammateIdle` | Prevent idle if acceptance criteria unmet | Exit code 2 = push feedback | Agent SDK only — not available in Claude Code CLI |
+| `TaskCompleted` | Reject task completion without tests/lint/evidence | Exit code 2 = reject completion | Registered via plugin hooks |
+| `TeammateIdle` | Prevent idle if acceptance criteria unmet | Exit code 2 = push feedback | Registered via plugin hooks |
 
-> **Platform note**: Claude Code CLI supports `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`. `TaskCompleted` and `TeammateIdle` are Agent SDK (Teams API) events. The implementation file `on-task-completed.sh` exists for forward-compatibility but cannot be registered in the current plugin `hooks.json`. When the runtime migrates to Agent SDK, these hooks can be activated.
+> **Platform note**: This project currently registers `TaskCompleted`, `TaskCreated`, and `TeammateIdle` in the plugin `hooks.json`. Host runtimes that support these events will execute them; runtimes that ignore unsupported hook types effectively treat them as no-ops.
 
 Note: File ownership enforcement is NOT done via hooks — git worktree isolation provides physical separation. Prompt-level guidance is sufficient.
 

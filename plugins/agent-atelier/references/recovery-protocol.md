@@ -49,7 +49,13 @@ For each WI, determine its recoverable state:
 
 ### Step 3b: Candidate–WI Consistency Check
 
-If `active_candidate_set` is non-null, verify ALL referenced WIs (from `work_item_ids`) are in `candidate_validating` status. If any WI has been reset to `ready` (e.g., crash between `validate record` and the atomic clear), run `candidate clear --reason demoted` to reconcile loop-state. With the v0.2 atomic validate-clear, this scenario should be rare — `validate record` now includes `active_candidate_set → null` in the same transaction on failure.
+If `active_candidate_set` is non-null, verify ALL referenced WIs (from `work_item_ids`) are in an allowed active-candidate status:
+
+- `candidate_validating` — validation still running
+- `reviewing` — validation passed, review/completion still in progress
+- `done` — some members of a batch candidate may already be complete while the set remains active for the remaining WIs
+
+If any referenced WI has fallen back to `ready`, `pending`, `implementing`, or `blocked_on_human_gate`, treat the set as inconsistent and reconcile it. If **all** referenced WIs are `done`, clear the slot as completed. If the set contains `ready` WIs after a failed validation path, run `candidate clear --reason demoted` to restore consistency. With the v0.2 atomic validate-clear, these mismatches should be rare.
 
 ### Step 4: Restore Gate Awareness
 

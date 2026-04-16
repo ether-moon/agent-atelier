@@ -192,9 +192,19 @@ def _verb_commit(root, verb_input):
     applies the patch, bumps revisions, then delegates to _commit for
     WAL-based atomic write.
     """
+    if not isinstance(verb_input, dict):
+        json.dump({
+            "committed": False,
+            "reason": "invalid_verb_payload",
+            "message": "verb transaction must be a JSON object",
+        }, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 1
+
     verb = verb_input.get("verb")
     target = verb_input.get("target")
     fields = verb_input.get("fields", {})
+    based_on_revision = verb_input.get("based_on_revision")
 
     if verb not in VERB_WHITELIST:
         json.dump({
@@ -206,6 +216,24 @@ def _verb_commit(root, verb_input):
         return 1
 
     spec = VERB_WHITELIST[verb]
+
+    if not isinstance(fields, dict):
+        json.dump({
+            "committed": False,
+            "reason": "invalid_verb_payload",
+            "message": "'fields' must be an object",
+        }, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 1
+
+    if not isinstance(based_on_revision, int):
+        json.dump({
+            "committed": False,
+            "reason": "invalid_verb_payload",
+            "message": "'based_on_revision' must be an integer",
+        }, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 1
 
     # Validate fields against whitelist
     disallowed = set(fields.keys()) - spec["fields"]
@@ -244,7 +272,19 @@ def _verb_commit(root, verb_input):
     with open(file_path, encoding="utf-8") as fh:
         store = json.load(fh)
 
-    expected_revision = store.get("revision")
+    current_revision = store.get("revision")
+    if current_revision != based_on_revision:
+        json.dump({
+            "committed": False,
+            "reason": "stale_revision",
+            "path": file_rel,
+            "expected": based_on_revision,
+            "actual": current_revision,
+        }, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 2
+
+    expected_revision = based_on_revision
 
     if spec["target_type"] == "work_item":
         if not target:
@@ -367,6 +407,46 @@ def _resolve_dependencies(root, writes):
     return transitioned
 
 
+def _depends_on_changed(root, writes):
+    """Return True when this transaction mutates any WI dependency set."""
+    wi_write = None
+    for w in writes:
+        if w["path"].endswith("work-items.json"):
+            wi_write = w
+            break
+
+    if wi_write is None:
+        return False
+
+    content = wi_write["content"]
+    if not isinstance(content, dict):
+        return False
+
+    new_items = content.get("items", [])
+    old_items = {}
+    old_path = resolve_tx_path(root, wi_write["path"])
+    if os.path.exists(old_path):
+        with open(old_path, encoding="utf-8") as fh:
+            old_data = json.load(fh)
+        old_items = {
+            item.get("id"): item.get("depends_on", [])
+            for item in old_data.get("items", [])
+        }
+
+    for item in new_items:
+        wi_id = item.get("id")
+        new_deps = item.get("depends_on", [])
+        old_deps = old_items.get(wi_id)
+        if old_deps is None:
+            if new_deps:
+                return True
+            continue
+        if old_deps != new_deps:
+            return True
+
+    return False
+
+
 def _detect_cycles(writes):
     """Check for dependency cycles in work-items.json.
 
@@ -459,10 +539,27 @@ def main():
             sys.stdout.write("\n")
             return 1
 
+        if not isinstance(tx, dict):
+            json.dump({
+                "committed": False,
+                "reason": "invalid_transaction",
+                "message": "transaction must be a JSON object",
+            }, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 1
+
         is_verb = "verb" in tx
         if not is_verb:
             writes = tx.get("writes", [])
             deletes = tx.get("deletes", [])
+            if not isinstance(writes, list) or not isinstance(deletes, list):
+                json.dump({
+                    "committed": False,
+                    "reason": "invalid_transaction",
+                    "message": "'writes' and 'deletes' must be lists",
+                }, sys.stdout, indent=2)
+                sys.stdout.write("\n")
+                return 1
             if not writes and not deletes:
                 print("Empty transaction", file=sys.stderr)
                 return 1
@@ -523,15 +620,16 @@ def _commit(root, tx, writes, deletes):
             return 2
 
     # Phase 1b: dependency cycle detection
-    cycle = _detect_cycles(writes)
-    if cycle:
-        json.dump({
-            "committed": False,
-            "reason": "dependency_cycle",
-            "cycle": cycle,
-        }, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 1
+    if _depends_on_changed(root, writes):
+        cycle = _detect_cycles(writes)
+        if cycle:
+            json.dump({
+                "committed": False,
+                "reason": "dependency_cycle",
+                "cycle": cycle,
+            }, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 1
 
     # Phase 1c: pre-WAL dependency resolution
     auto_transitioned = _resolve_dependencies(root, writes)

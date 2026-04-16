@@ -569,6 +569,7 @@ EOF
 RESULT=$(echo '{
   "verb": "heartbeat",
   "target": "WI-010",
+  "based_on_revision": 10,
   "fields": {"last_heartbeat_at": "2026-04-08T12:00:00Z", "lease_expires_at": "2026-04-08T13:30:00Z"}
 }' | "$COMMIT" --root "$TMPDIR")
 
@@ -591,6 +592,7 @@ pass "Verb heartbeat: WI revision bumped"
 RESULT=$(echo '{
   "verb": "heartbeat",
   "target": "WI-010",
+  "based_on_revision": 11,
   "fields": {"status": "done", "last_heartbeat_at": "2026-04-08T12:00:00Z"}
 }' | "$COMMIT" --root "$TMPDIR" 2>/dev/null; echo "EXIT:$?")
 
@@ -614,6 +616,7 @@ pass "Verb heartbeat: state unchanged after disallowed field rejection"
 RESULT=$(echo '{
   "verb": "record-attempt",
   "target": "WI-010",
+  "based_on_revision": 11,
   "fields": {"attempt_count": 3, "last_attempt_ref": "attempt-003.json", "last_finding_fingerprint": "fp-abc"}
 }' | "$COMMIT" --root "$TMPDIR")
 
@@ -626,7 +629,66 @@ fi
 assert_json "$TMPDIR/.agent-atelier/work-items.json" "data['items'][0]['attempt_count'] == 3"
 pass "Verb record-attempt: field value applied correctly"
 
-# ── Test 20: Unknown verb rejected ───────────────────────────────
+# ── Test 20: Verb stale revision rejected ────────────────────────
+RESULT=$(echo '{
+  "verb": "heartbeat",
+  "target": "WI-010",
+  "based_on_revision": 11,
+  "fields": {"last_heartbeat_at": "2026-04-08T15:00:00Z", "lease_expires_at": "2026-04-08T16:00:00Z"}
+}' | "$COMMIT" --root "$TMPDIR" 2>/dev/null; echo "EXIT:$?")
+
+if echo "$RESULT" | grep -q '"stale_revision"'; then
+  pass "Verb stale revision rejected"
+else
+  fail "Verb stale revision was not rejected"
+fi
+
+if echo "$RESULT" | grep -q 'EXIT:2'; then
+  pass "Verb stale revision exits with code 2"
+else
+  fail "Verb stale revision did not exit with code 2"
+fi
+
+# ── Test 21: Verb malformed fields rejected ──────────────────────
+RESULT=$(echo '{
+  "verb": "heartbeat",
+  "target": "WI-010",
+  "based_on_revision": 12,
+  "fields": []
+}' | "$COMMIT" --root "$TMPDIR" 2>/dev/null; echo "EXIT:$?")
+
+if echo "$RESULT" | grep -q '"invalid_verb_payload"'; then
+  pass "Verb malformed payload rejected"
+else
+  fail "Verb malformed payload was not rejected"
+fi
+
+if echo "$RESULT" | grep -q 'EXIT:1'; then
+  pass "Verb malformed payload exits with code 1"
+else
+  fail "Verb malformed payload did not exit with code 1"
+fi
+
+# ── Test 22: Verb missing based_on_revision rejected ────────────
+RESULT=$(echo '{
+  "verb": "heartbeat",
+  "target": "WI-010",
+  "fields": {"last_heartbeat_at": "2026-04-08T15:30:00Z"}
+}' | "$COMMIT" --root "$TMPDIR" 2>/dev/null; echo "EXIT:$?")
+
+if echo "$RESULT" | grep -q '"invalid_verb_payload"'; then
+  pass "Verb missing based_on_revision rejected"
+else
+  fail "Verb missing based_on_revision was not rejected"
+fi
+
+if echo "$RESULT" | grep -q 'EXIT:1'; then
+  pass "Verb missing based_on_revision exits with code 1"
+else
+  fail "Verb missing based_on_revision did not exit with code 1"
+fi
+
+# ── Test 23: Unknown verb rejected ───────────────────────────────
 RESULT=$(echo '{
   "verb": "delete-everything",
   "target": "WI-010",
@@ -639,10 +701,11 @@ else
   fail "Unknown verb was not rejected"
 fi
 
-# ── Test 21: Verb with empty fields rejected ─────────────────────
+# ── Test 24: Verb with empty fields rejected ─────────────────────
 RESULT=$(echo '{
   "verb": "heartbeat",
   "target": "WI-010",
+  "based_on_revision": 12,
   "fields": {}
 }' | "$COMMIT" --root "$TMPDIR" 2>/dev/null; echo "EXIT:$?")
 
@@ -652,10 +715,11 @@ else
   fail "Verb with empty fields was not rejected"
 fi
 
-# ── Test 22: Verb target not found ───────────────────────────────
+# ── Test 25: Verb target not found ───────────────────────────────
 RESULT=$(echo '{
   "verb": "heartbeat",
   "target": "WI-NONEXISTENT",
+  "based_on_revision": 12,
   "fields": {"last_heartbeat_at": "2026-04-08T12:00:00Z"}
 }' | "$COMMIT" --root "$TMPDIR" 2>/dev/null; echo "EXIT:$?")
 
@@ -665,7 +729,7 @@ else
   fail "Verb target not found was not rejected"
 fi
 
-# ── Test 23: watchdog-tick-meta verb (store-level) ───────────────
+# ── Test 26: watchdog-tick-meta verb (store-level) ───────────────
 cat > "$TMPDIR/.agent-atelier/watchdog-jobs.json" <<'EOF'
 {
   "revision": 1,
@@ -678,6 +742,7 @@ EOF
 RESULT=$(echo '{
   "verb": "watchdog-tick-meta",
   "target": null,
+  "based_on_revision": 1,
   "fields": {"open_alerts": ["alert-001"], "last_tick_at": "2026-04-08T14:00:00Z"}
 }' | "$COMMIT" --root "$TMPDIR")
 
@@ -693,7 +758,7 @@ pass "Verb watchdog-tick-meta: store-level fields applied correctly"
 echo ""
 echo "=== v0.2 Dependency Resolver Tests ==="
 
-# ── Test 24: done transition → pending auto-ready ────────────────
+# ── Test 27: done transition → pending auto-ready ────────────────
 cat > "$TMPDIR/.agent-atelier/work-items.json" <<'EOF'
 {
   "revision": 20,
@@ -740,7 +805,7 @@ pass "Dependency resolver: WI-C remains pending (WI-B not done)"
 assert_json "$TMPDIR/.agent-atelier/work-items.json" "data['items'][1]['revision'] == 2"
 pass "Dependency resolver: auto-transitioned WI revision bumped"
 
-# ── Test 25: blocked_on_human_gate protected from auto-transition ─
+# ── Test 28: blocked_on_human_gate protected from auto-transition ─
 cat > "$TMPDIR/.agent-atelier/work-items.json" <<'EOF'
 {
   "revision": 25,
@@ -780,7 +845,7 @@ pass "Gate protection: blocked_on_human_gate WI not auto-transitioned"
 echo ""
 echo "=== v0.2 Cycle Detection Tests ==="
 
-# ── Test 26: A→B→A cycle rejected ────────────────────────────────
+# ── Test 29: A→B→A cycle rejected ────────────────────────────────
 cat > "$TMPDIR/.agent-atelier/work-items.json" <<'EOF'
 {
   "revision": 30,
@@ -820,7 +885,7 @@ fi
 assert_json "$TMPDIR/.agent-atelier/work-items.json" "data['revision'] == 30"
 pass "Cycle detection: state unchanged after rejection"
 
-# ── Test 27: No cycle — linear chain passes ──────────────────────
+# ── Test 30: No cycle — linear chain passes ──────────────────────
 RESULT=$(echo '{
   "writes": [{
     "path": ".agent-atelier/work-items.json",
@@ -843,13 +908,46 @@ else
   fail "No cycle: linear chain was rejected"
 fi
 
-# ── Test 28: 3-node cycle A→B→C→A rejected ──────────────────────
+# ── Test 31: Existing cycle does not block unrelated status write ─
+cat > "$TMPDIR/.agent-atelier/work-items.json" <<'EOF'
+{
+  "revision": 40,
+  "updated_at": "2026-04-08T10:00:00Z",
+  "items": [
+    {"id": "WI-C1", "status": "pending", "revision": 1, "depends_on": ["WI-C2"]},
+    {"id": "WI-C2", "status": "pending", "revision": 1, "depends_on": ["WI-C1"]}
+  ]
+}
+EOF
+
 RESULT=$(echo '{
   "writes": [{
     "path": ".agent-atelier/work-items.json",
-    "expected_revision": 31,
+    "expected_revision": 40,
     "content": {
-      "revision": 32,
+      "revision": 41,
+      "updated_at": "2026-04-08T11:00:00Z",
+      "items": [
+        {"id": "WI-C1", "status": "implementing", "revision": 2, "depends_on": ["WI-C2"]},
+        {"id": "WI-C2", "status": "pending", "revision": 1, "depends_on": ["WI-C1"]}
+      ]
+    }
+  }]
+}' | "$COMMIT" --root "$TMPDIR")
+
+if echo "$RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['committed'] is True" 2>/dev/null; then
+  pass "Existing dependency cycle does not block unrelated status write"
+else
+  fail "Existing dependency cycle should not block unrelated status write"
+fi
+
+# ── Test 32: 3-node cycle A→B→C→A rejected ──────────────────────
+RESULT=$(echo '{
+  "writes": [{
+    "path": ".agent-atelier/work-items.json",
+    "expected_revision": 41,
+    "content": {
+      "revision": 42,
       "updated_at": "2026-04-08T12:00:00Z",
       "items": [
         {"id": "WI-1", "status": "pending", "revision": 1, "depends_on": ["WI-3"]},

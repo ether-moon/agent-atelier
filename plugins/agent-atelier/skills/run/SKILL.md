@@ -103,7 +103,7 @@ Shut down via `SendMessage({type: "shutdown_request"})` when their phase ends.
 
 When spawning a Builder for a work item, check the WI's `complexity` field in `work-items.json`:
 
-- **`null`**: Complexity not yet set. The Architect must set it before the WI can proceed. If encountered at spawn time, reject with an error directing the Architect to set complexity.
+- **`null`**: Complexity not yet set. This is an orchestration bug, not a Builder decision. Reject the spawn, return the WI to Architect attention, and set complexity before the WI proceeds.
 - **`simple`**: Spawn with `mode: "acceptEdits"`. Builder implements immediately.
 - **`complex`**: Spawn with `mode: "plan"`. The Builder starts in read-only plan mode — Write/Edit tools are blocked by the harness. The Builder proposes a plan, calls `ExitPlanMode`, which sends a structured `plan_approval_request` to the Orchestrator. After `plan_approval_response(approve: true)`, the Builder's permission mode auto-transitions to `bypassPermissions` for implementation.
 
@@ -239,9 +239,9 @@ All mode transitions are explicit — the Orchestrator directs the State Manager
 ### BUILD_PLAN
 - **Actors:** Architect
 - **Activity:** Architect decomposes spec into vertical-slice work items via `wi upsert`
-- **Verify hard gate:** Before transitioning to IMPLEMENT, verify ALL `ready` WIs have `verify.length >= 1`. If any WI has an empty verify array, reject the transition and report the WI IDs. The Architect must add verify items before the loop can proceed.
-- **Complexity requirement:** The Architect must set `complexity` on every WI (default is `null`). WIs with `null` complexity cannot qualify for fast-track review.
-- **Transition:** → IMPLEMENT when all WIs are created, at least one is `ready`, and the verify hard gate passes
+- **Verify hard gate:** Before transitioning to IMPLEMENT, verify ALL `ready` WIs have `verify.length >= 1`. If any WI has an empty verify array, reject the transition and report the WI IDs.
+- **Complexity hard gate:** Before transitioning to IMPLEMENT, verify ALL `ready` WIs have non-null `complexity`. `null` means "not yet assessed" and must be fixed by the Architect before execution begins.
+- **Transition:** → IMPLEMENT when all WIs are created, at least one is `ready`, and both hard gates pass
 
 ### IMPLEMENT
 - **Actors:** Builder(s), Architect (support)
@@ -368,7 +368,7 @@ The poll job created in Phase 2 fires when the REPL is idle. On each tick:
    - `heartbeat_warning` (warning) → message Builder via `SendMessage` to send `execute heartbeat`
    - `gate_resolved` → re-read gate state, resume blocked WIs
    - `gate_opened` → present HDR to user immediately
-   - `ci_status` (success) → proceed with VALIDATE → REVIEW_SYNTHESIS transition
+  - `ci_status` (success) → evaluate fast-track, then transition to IMPLEMENT or REVIEW_SYNTHESIS
    - `ci_status` (failure/cancelled) → record validation failure, candidate demotion
    - `branch_divergence` (critical) → inform user, strongly recommend rebase
 3. **WARNING events** — log for next human-visible status report.

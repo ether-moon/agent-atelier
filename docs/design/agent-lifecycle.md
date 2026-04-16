@@ -93,8 +93,8 @@ A WI becomes `done` only after:
 
 Validator may start only when:
 
-- WI is `candidate_validating`
-- WI is the current `active_candidate`
+- all target WIs are `candidate_validating`
+- the candidate set is the current `active_candidate_set`
 
 ### 4.2 Execution
 
@@ -108,16 +108,16 @@ Validator:
 
 If validation exceeds `candidate_timeout_minutes` (default 30) without producing a manifest:
 
-- watchdog detects via `candidate_activated_at` timestamp in `loop-state.json`
-- watchdog demotes the candidate: clears `active_candidate`, returns WI to `ready`
-- next candidate in the FIFO queue is activated
+- watchdog detects via `active_candidate_set.activated_at` in `loop-state.json`
+- watchdog demotes the candidate set: clears `active_candidate_set`, returns all referenced WIs to `ready`
+- next candidate set in the FIFO queue is activated
 
 ### 4.4 Finish
 
 Validator requests one of:
 
 - `reviewing` if validation passed
-- demotion if validation failed — `validate record` updates work-items.json only (status → `ready`, promotion cleared, `promotion.status` → `demoted`). Loop-state cleanup (`active_candidate` → null) is **not** validate's responsibility — the Orchestrator calls `candidate clear --reason demoted` separately.
+- demotion if validation failed — `validate record` atomically updates work-items.json (status → `ready`, promotion cleared, `promotion.status` → `not_ready`) and clears `active_candidate_set`
 - environment-error escalation if tooling failed in a non-code way (WI stays `candidate_validating`)
 
 ---
@@ -189,14 +189,14 @@ An unexpired lease remains valid only while the recorded owner is still reachabl
 
 1. executor produces candidate branch / commit
 2. candidate is queued
-3. State Manager promotes one queued candidate to `active_candidate`
-4. validator runs on the active candidate
+3. State Manager promotes one queued candidate set to `active_candidate_set`
+4. validator runs on the active candidate set
 5. candidate either:
    - advances to review / completion
    - is demoted back to implementation due to findings
    - is re-queued or cleared by watchdog if validation stalls
 
-Demotion responsibility split: `validate record` handles work-items.json (WI status and promotion metadata); `candidate clear --reason demoted` handles loop-state.json (active_candidate slot). The `candidate clear` demoted path is idempotent — if validate has already demoted the WI, candidate clear skips the WI write and only clears the loop-state slot.
+Demotion is batch-wide and atomic: `validate record` handles work-items.json (WI status and promotion metadata) and loop-state.json (`active_candidate_set` → null) in one transaction. `candidate clear --reason demoted` remains available as an idempotent repair path for recovery, not the normal demotion flow.
 
 ---
 

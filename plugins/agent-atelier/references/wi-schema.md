@@ -53,7 +53,7 @@ Every work item has these fields. Missing fields get the defaults shown below.
 
 `null` | `"simple"` | `"complex"`
 
-Default is `null`. A `null` complexity means the Architect has not yet assessed it. WIs with `null` complexity cannot qualify for fast-track review.
+Default is `null`. A `null` complexity means the Architect has not yet assessed it. WIs with `null` complexity are not executable: they must not leave BUILD_PLAN as `ready`, Builders must not claim them, and they cannot qualify for fast-track review.
 
 ## Normalization Rules
 
@@ -84,7 +84,7 @@ When status is NOT `blocked_on_human_gate` and the caller did not explicitly set
 Increment the work item's `revision` by 1 on every write.
 
 ### 7. Complexity field
-`complexity` must be one of `null`, `"simple"`, or `"complex"`. Default is `null`. The Architect must explicitly set complexity on every WI during BUILD_PLAN. Reject any value other than `null`, `"simple"`, or `"complex"`.
+`complexity` must be one of `null`, `"simple"`, or `"complex"`. Default is `null`. The Architect must explicitly set complexity on every WI during BUILD_PLAN. `null` is only a temporary planning value — `ready` WIs must not retain it. Reject any value other than `null`, `"simple"`, or `"complex"`.
 
 ### 8. depends_on immutability
 `depends_on` is immutable after the initial upsert. If a work item already exists and has a non-empty `depends_on`, reject any upsert that changes its value. This prevents native task dependency drift — the Agent Teams API supports `addBlockedBy` but not removal, so stale blockers cannot be cleaned up. If dependency restructuring is needed, the Architect should create a new WI with the correct dependencies and retire the old one.

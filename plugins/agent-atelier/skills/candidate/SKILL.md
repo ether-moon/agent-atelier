@@ -143,18 +143,18 @@ Clears the active candidate set after validation completes or after demotion due
    - Commit loop-state only.
 
    **`demoted`** (default) — Validation failed. **All WIs in the set return to rework** (fate-sharing: all-or-nothing).
-   - **Idempotency guard:** If all WIs are already in `ready` status with `promotion.status` == `demoted` (i.e., `validate record` already handled the demotion), skip the work-items.json write — only clear the loop-state slot.
+   - **Idempotency guard:** If all WIs are already in `ready` status with promotion metadata fully cleared (`candidate_branch` / `candidate_commit` null and `promotion.status == "not_ready"`), skip the work-items.json write — only clear the loop-state slot.
    - **If any WI still needs demotion** (status is not `ready` or promotion not yet cleared):
      - **work-items.json** (for each WI in the set):
        - `status` → `ready`
        - `promotion.candidate_branch` → null
        - `promotion.candidate_commit` → null
-       - `promotion.status` → `demoted`
+       - `promotion.status` → `not_ready`
        - Bump item `revision`
      - **loop-state.json:** `active_candidate_set` → null. Bump `revision`, set `updated_at`.
      - Commit both files in one transaction.
      - **Sync native tasks.** For each WI, look up the native task (search `TaskList` for subject starting with the WI's ID prefix). If found, call `TaskUpdate` with `status: "pending"`.
-   - **If all WIs already demoted:**
+   - **If all WIs are already reset to `ready` with cleared promotion metadata:**
      - **loop-state.json:** `active_candidate_set` → null. Bump `revision`, set `updated_at`.
      - Commit loop-state only.
 
@@ -183,7 +183,11 @@ The `enqueue` subcommand accepts payload via:
 
 Required flags for all mutating operations:
 - `--request-id <id>` — unique request identifier for idempotency tracking
-- `--based-on-revision <N>` — the store revision observed at read time (applies to both `loop-state.json` and `work-items.json`)
+
+Revision handling:
+- Candidate lifecycle commands are multi-file writes
+- Track the current revision of every file you mutate and use the matching `expected_revision` for each JSON artifact in the `state-commit` transaction
+- Do not reuse a single shared revision value for both `loop-state.json` and `work-items.json` unless they actually match on disk
 
 ## Output Contract
 

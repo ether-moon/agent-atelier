@@ -94,7 +94,7 @@ Registers a validation run manifest and updates the work item status based on th
 
    **If `passed`:**
    - **work-items.json:** All WIs `status` → `reviewing`. Bump each item `revision`.
-   - **loop-state.json:** No change — the candidate set stays active for the review and completion phase.
+   - **loop-state.json:** No change — the candidate set stays active for the review and completion phase, and is cleared only after the last WI completes.
    - Commit work-items.json only.
 
    **If `failed`:** (atomic demotion + candidate set clear — fate-sharing)
@@ -102,7 +102,7 @@ Registers a validation run manifest and updates the work item status based on th
      - `status` → `ready`
      - `promotion.candidate_branch` → null
      - `promotion.candidate_commit` → null
-     - `promotion.status` → `demoted`
+     - `promotion.status` → `not_ready`
      - Bump item `revision`
    - **loop-state.json:** `active_candidate_set` → null. Bump `revision`, set `updated_at`.
    - Commit **both** files in one transaction. The candidate set is atomically cleared alongside the WI demotion — no separate `candidate clear` call is needed.
@@ -143,7 +143,11 @@ The `record` subcommand accepts payload via:
 
 Required flags:
 - `--request-id <id>` — unique request identifier for idempotency tracking
-- `--based-on-revision <N>` — the store revision observed at read time
+
+Revision handling:
+- `validate record` may write both `work-items.json` and `loop-state.json`
+- Track the current revision of every JSON file you mutate and use the matching `expected_revision` per file in the `state-commit` transaction
+- Do not collapse multi-file optimistic concurrency into one shared revision unless the files actually share that value on disk
 
 ## Output Contract
 

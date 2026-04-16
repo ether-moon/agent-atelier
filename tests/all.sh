@@ -178,7 +178,18 @@ if [ -x "$ROOT/tests/mutation_flow.sh" ]; then
     fail "Mutation flow tests failed"
   fi
 else
-  echo "  SKIP: tests/mutation_flow.sh not found or not executable"
+  fail "tests/mutation_flow.sh not found or not executable"
+fi
+
+# ── Orchestration contract tests ─────────────────────────────────────
+if [ -x "$ROOT/tests/orchestration_contracts.sh" ]; then
+  if "$ROOT/tests/orchestration_contracts.sh"; then
+    pass "Orchestration contract tests pass"
+  else
+    fail "Orchestration contract tests failed"
+  fi
+else
+  fail "tests/orchestration_contracts.sh not found or not executable"
 fi
 
 # ── Monitor script tests ────────────────────────────────────────────

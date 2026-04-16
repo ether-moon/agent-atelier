@@ -1,6 +1,6 @@
 ---
 name: status
-description: "Show the orchestration dashboard — current loop mode, work item summary, active candidate, open gates, and next action. Use when checking progress, understanding what's happening, reviewing the backlog, or when the user says 'status', 'show state', 'what's going on', 'dashboard', or 'where are we'. This is the go-to skill for situational awareness."
+description: "Show the orchestration dashboard — current loop mode, work item summary, active candidate set, open gates, and next action. Use when checking progress, understanding what's happening, reviewing the backlog, or when the user says 'status', 'show state', 'what's going on', 'dashboard', or 'where are we'. This is the go-to skill for situational awareness."
 ---
 
 # Status — Orchestration Dashboard
@@ -39,7 +39,7 @@ description: "Show the orchestration dashboard — current loop mode, work item 
 ```
 Mode:             IMPLEMENT
 Active Spec:      docs/product/behavior-spec.md (rev 7)
-Active Candidate: WI-014 on candidate/WI-014 @ abc1234
+Active Candidate: CS-003 (WI-014, WI-015) on candidate/WI-014 @ abc1234
 Next Action:      orchestrator → dispatch_vrm_evidence_run → WI-014
 ```
 
@@ -86,10 +86,13 @@ Returns JSON to stdout:
   "active_spec": "docs/product/behavior-spec.md",
   "active_spec_revision": 7,
   "open_gates": ["HDR-002"],
-  "active_candidate": {
-    "work_item_id": "WI-014",
+  "active_candidate_set": {
+    "id": "CS-003",
+    "work_item_ids": ["WI-014", "WI-015"],
     "branch": "candidate/WI-014",
-    "commit": "abc1234"
+    "commit": "abc1234",
+    "type": "batch",
+    "activated_at": "2026-04-08T14:10:00Z"
   },
   "candidate_queue": [],
   "work_items_summary": {

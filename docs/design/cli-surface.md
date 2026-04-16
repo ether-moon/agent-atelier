@@ -42,7 +42,8 @@ State-mutating commands should accept either:
 Required common flags for mutating commands:
 
 - `--request-id`
-- `--based-on-revision`
+- `--based-on-revision` for single-file writes
+- per-file revision basis for multi-file transactions
 
 ---
 
@@ -124,6 +125,8 @@ Preconditions:
 
 - evidence refs exist
 - validator run exists
+- WI is in `reviewing`
+- manifest candidate set / branch / commit match the active candidate set
 - requested revision is current
 
 Effects:
@@ -144,17 +147,17 @@ Adds a WI candidate to the queue.
 
 #### `agent-atelier candidate activate`
 
-Moves one queued candidate into `active_candidate`.
+Moves one queued candidate set into `active_candidate_set`.
 
 #### `agent-atelier candidate clear`
 
-Clears the active candidate after completion or demotion.
+Clears the active candidate set after completion or demotion.
 
 ### 4.6 Validation Commands
 
 #### `agent-atelier validate record`
 
-Registers a validation run manifest and links it to the WI.
+Registers a validation run manifest for a candidate set and links it to one or more WIs.
 
 ### 4.7 Human Gate Commands
 
@@ -236,7 +239,7 @@ If the command is idempotently replayed, it may return:
 
 - same `request_id` + same payload -> replay success
 - same `request_id` + different payload -> reject
-- stale `based_on_revision` -> reject with exit code `2`
+- stale revision basis -> reject with exit code `2`
 
 ---
 
