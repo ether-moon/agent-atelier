@@ -1,0 +1,29 @@
+## Decisions Made
+- Two-Tier State (Patch/Verb) 모델 채택: SM 직렬 병목(#6) 해결을 위해 data-plane 쓰기를 verb 모드로 분리. 파일 분리 대신 patch/verb 연산으로 revision 간섭 방지
+- candidate_set 1급 객체 도입: active_candidate 단일 슬롯을 배치 지원 candidate_set으로 대체. ID + type 확장성 확보
+- Pre-WAL dependency resolver: 의존성 자동 전이를 WAL 기록 직전에 계산하여 replay 결정성 보장. post-commit hook 방식 대신 채택
+- Fate-sharing 배치 실패 정책: 배치 내 하나라도 실패 시 전체 demotion (all-or-nothing). 부분 demotion 대비 구현 단순성과 일관성 확보
+- Fast-track per-batch 보수적 기준: 모든 WI simple + VRM passed + diff 30줄 이하 + 민감 경로 미포함 시에만 리뷰 스킵
+- Complexity 기본값 null: "simple" 대신 null로 변경하여 Architect 명시 설정 강제. fast-track 자격 자동 부여 방지
+- 사이클 감지 DFS at upsert: depends_on 설정 시점에서 즉시 감지하여 런타임 데드락 방지
+
+## Problems Encountered
+- Gemini CLI 피어 리뷰 타임아웃: peer-review.sh 실행 중 gemini가 timeout으로 실패. Codex와 Claude 결과만으로 진행
+- owner_session_id 분류 오류: 초기 설계에서 data-plane으로 분류했으나 Claude 피어 리뷰에서 control-plane 필수 지적. status 전이와 필연적 결합이므로 control-plane으로 재분류
+
+## Constraints Identified
+- state-commit 단일 writer 보장: 모든 상태 변경은 state-commit 스크립트를 통해야 하며 verb 모드도 동일한 lock/WAL/revision 흐름 사용 필수
+- verify 스코프 제한: verify 항목은 해당 WI의 owned_paths 범위 내에서만 검증 가능해야 함 (프롬프트 수준 강제)
+- WAL replay 결정성: 의존성 파생 전이를 WAL에 포함해야 replay 시 동일 결과 보장
+
+## Open Questions
+- None
+
+## Context
+agent-atelier v0.1.3에 대한 17건의 실사용 피드백을 분석하여 MAJOR 4건 + 관련 2건을 통합 오케스트레이션 모델 v0.2로 설계. Codex와 Claude의 피어 리뷰를 거쳐 5개 ambiguous 설계 결정을 확정하고 design spec 문서를 작성 완료. 7단계 구현 계획이 승인되어 구현 준비 완료 상태.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
