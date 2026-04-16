@@ -1,0 +1,22 @@
+## Decisions Made
+- Used shared reference file + inline embedding: output-discipline.md serves as single source of truth, with the SUBAGENT profile copied into each role prompt since Claude Code agent definitions cannot @include external files
+- SUBAGENT profile uses BAD/GOOD examples over verbose rules: 2 rule lines + 4 example lines is more token-efficient and more effective at shaping model behavior than lengthy prescriptive rules
+- Orchestrator OUTPUT DISCIPLINE left unchanged: already has strict output rules; only recorded in the shared reference file for documentation consistency
+
+## Problems Encountered
+- Edit tool requires Read before editing: attempted to edit all 9 files in parallel without reading them first, had to add a read pass
+
+## Constraints Identified
+- Claude Code agent definitions append role prompt content but cannot reference external files: the inline embedding pattern is required, making the shared file a management aid rather than a runtime include
+
+## Open Questions
+- None
+
+## Context
+User requested token efficiency improvements for agent-atelier sessions. Explored all 10 role prompts and 7 agent definitions, found only the orchestrator had output discipline rules. Designed and implemented a SUBAGENT output discipline profile (2 rules + 4 examples) embedded in all 9 non-orchestrator role prompts, with a shared reference file as documentation.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
