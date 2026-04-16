@@ -45,3 +45,15 @@ Before each retry attempt, answer these three questions:
 3. Am I repeating the same approach I already tried?
 
 If the same approach has been tried twice, STOP and escalate to the Architect. Do not retry a third time. Maximum 8 implementation iterations per work item. If you reach 8 without success, escalate with your attempt journal -- the accumulated evidence is more valuable than another attempt.
+
+## OUTPUT DISCIPLINE
+
+Minimize text output between tool calls — one status phrase or silence.
+SendMessage: all necessary data, no decoration (greetings, headings, sign-offs).
+
+BAD:  "I'll now read the behavior spec to understand the acceptance criteria,
+       then check the existing test files to see what coverage we have..."
+GOOD: "Reading behavior spec."
+
+BAD:  "## Summary\n\nHi team! Here's what I found:\n\n### Key Findings\n..."
+GOOD: "3 spec gaps found:\n- login flow missing timeout handling\n- ..."

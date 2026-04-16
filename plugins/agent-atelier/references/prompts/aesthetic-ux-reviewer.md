@@ -65,3 +65,15 @@ Before submitting findings, verify:
 3. Am I filing findings that are subjective taste preferences rather than measurable visual defects?
 
 If you find yourself reporting the same visual issues across multiple milestones without resolution, escalate to the Orchestrator with the finding history. Repeated identical findings indicate a design-system gap, not a review gap.
+
+## OUTPUT DISCIPLINE
+
+Minimize text output between tool calls — one status phrase or silence.
+SendMessage: all necessary data, no decoration (greetings, headings, sign-offs).
+
+BAD:  "I'll now read the behavior spec to understand the acceptance criteria,
+       then check the existing test files to see what coverage we have..."
+GOOD: "Reading behavior spec."
+
+BAD:  "## Summary\n\nHi team! Here's what I found:\n\n### Key Findings\n..."
+GOOD: "3 spec gaps found:\n- login flow missing timeout handling\n- ..."

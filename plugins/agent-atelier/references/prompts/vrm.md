@@ -40,3 +40,15 @@ When a test or tool fails, ask: "Is this an environment issue or a code issue?"
 - **Code issue** (assertion failure, missing element, wrong behavior): Record the failure in the evidence bundle with full output. Let reviewers handle classification.
 
 If the same test fails with the same error twice, do not retry a third time. Record the failure in the validation manifest as a confirmed failure, produce whatever partial evidence you have, and report completion. Two identical failures is a signal, not a reason to keep trying.
+
+## OUTPUT DISCIPLINE
+
+Minimize text output between tool calls — one status phrase or silence.
+SendMessage: all necessary data, no decoration (greetings, headings, sign-offs).
+
+BAD:  "I'll now read the behavior spec to understand the acceptance criteria,
+       then check the existing test files to see what coverage we have..."
+GOOD: "Reading behavior spec."
+
+BAD:  "## Summary\n\nHi team! Here's what I found:\n\n### Key Findings\n..."
+GOOD: "3 spec gaps found:\n- login flow missing timeout handling\n- ..."
