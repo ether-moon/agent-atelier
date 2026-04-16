@@ -1,0 +1,23 @@
+## Decisions Made
+- Deterministic fallback over glob: on-stop.sh fallback now derives the expected team name from the current repo root instead of picking the first atelier-* match, preventing cross-project misidentification.
+- 8-char hash prefix: Increased from 4 to 8 hex chars to materially reduce collision risk across repos with similar basenames.
+- TeamCreate/TeamDelete as canonical names: These are the actual Claude Code tool names; foundations.md informal names (spawnTeam/cleanup) updated for consistency.
+- Safety guard on destructive fallback: rm -rf in documentation now requires non-empty team_name with atelier- prefix validation before deletion.
+
+## Problems Encountered
+- CodeRabbit flagged that the atelier-* glob fallback in on-stop.sh could select a different project's team directory when multiple atelier-* dirs exist: resolved by computing the expected name deterministically.
+
+## Constraints Identified
+- Hash derivation must stay in sync: on-stop.sh fallback, SKILL.md team name derivation, and any future code that resolves team names must use identical sanitization and hash length (currently 8 chars of sha256).
+
+## Open Questions
+- None
+
+## Context
+Scanned PR #8 (session-scoped-teams) for blockers. No merge conflicts or CI failures found. Addressed 4 CodeRabbit review comments: critical safety guard for rm -rf, major fallback resolution fix, major naming inconsistency, and nitpick hash length increase. All 56 tests pass after changes.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
