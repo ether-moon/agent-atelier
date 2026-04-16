@@ -1564,7 +1564,7 @@ In the full architecture, this keeps the always-on core at **4 roles** and adds 
 ### Priority 2 — Full Role Graph Expansion ✓
 
 - [x] Write full role prompts for each agent (expand skeletons in Section 9 with embedded domain knowledge) → `references/prompts/` (10 files)
-- [x] Implement flat Agent Teams configuration (team spawn logic, conditional role lifecycle) → `skills/run/SKILL.md` (spawnTeam → phase-based activation → requestShutdown → cleanup)
+- [x] Implement flat Agent Teams configuration (team spawn logic, conditional role lifecycle) → `skills/run/SKILL.md` (TeamCreate → phase-based activation → requestShutdown → TeamDelete)
 - [x] Implement PM's Explore subagent pattern for codebase investigation → embedded in `references/prompts/pm.md`
 - [x] Expand Section 9 prompts from pilot-grade base prompts to production-grade prompt files if the role set stabilizes → `references/prompts/` are the production prompts
 - [ ] Optionally build custom MCP tooling for State Manager after pilot if `write()`-based coordination proves too noisy — **deferred: pilot evidence required**

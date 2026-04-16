@@ -44,21 +44,25 @@ Derive the team name from the git repository root:
 ```bash
 root=$(git rev-parse --show-toplevel)
 base=$(basename "$root" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_-' '-' | sed 's/-\{2,\}/-/g; s/^-//; s/-$//' | cut -c1-20)
-hash=$(printf '%s' "$root" | shasum -a 256 | cut -c1-4)
+hash=$(printf '%s' "$root" | shasum -a 256 | cut -c1-8)
 team_name="atelier-${base}-${hash}"
 ```
 
 Sanitization: lowercase → replace `[^a-z0-9_-]` with `-` → collapse consecutive `-` → strip leading/trailing `-` → then truncate to 20 chars.
 
-Examples (illustrative — hashes depend on full absolute path): `/Users/ether/.../lahore` → `atelier-lahore-a3f2`, `/Users/ether/.../karrot-tms` → `atelier-karrot-tms-7b1e`.
+Examples (illustrative — hashes depend on full absolute path): `/Users/ether/.../lahore` → `atelier-lahore-a3f2b1c9`, `/Users/ether/.../karrot-tms` → `atelier-karrot-tms-7b1e4d08`.
 
 Before creating the team, check for a stale team with the same name. If `~/.claude/teams/<team_name>/` exists:
 
 1. Try `TeamDelete` to remove it cleanly.
-2. If `TeamDelete` fails (e.g., stale members from a crashed session), force-remove:
+2. If `TeamDelete` fails (e.g., stale members from a crashed session), force-remove with a safety guard:
    ```bash
-   rm -rf ~/.claude/teams/<team_name>/
-   rm -rf ~/.claude/tasks/<team_name>/
+   if [[ -n "$team_name" && "$team_name" == atelier-* ]]; then
+     rm -rf "$HOME/.claude/teams/$team_name/"
+     rm -rf "$HOME/.claude/tasks/$team_name/"
+   else
+     echo "Refusing cleanup: invalid team_name '$team_name'" >&2
+   fi
    ```
 
 Then create the team:
