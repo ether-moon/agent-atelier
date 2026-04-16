@@ -70,6 +70,21 @@ VERB_WHITELIST = {
 }
 
 
+def _reject(exit_code, reason, **kwargs):
+    """Write a rejection response to stdout and return the exit code."""
+    json.dump({"committed": False, "reason": reason, **kwargs}, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return exit_code
+
+
+def _find_wi_write(writes):
+    """Find the work-items.json write in a transaction, or None."""
+    for w in writes:
+        if w["path"].endswith("work-items.json"):
+            return w
+    return None
+
+
 def resolve_root(explicit):
     if explicit:
         return os.path.realpath(explicit)
@@ -193,13 +208,7 @@ def _verb_commit(root, verb_input):
     WAL-based atomic write.
     """
     if not isinstance(verb_input, dict):
-        json.dump({
-            "committed": False,
-            "reason": "invalid_verb_payload",
-            "message": "verb transaction must be a JSON object",
-        }, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 1
+        return _reject(1, "invalid_verb_payload", message="verb transaction must be a JSON object")
 
     verb = verb_input.get("verb")
     target = verb_input.get("target")
@@ -207,94 +216,42 @@ def _verb_commit(root, verb_input):
     based_on_revision = verb_input.get("based_on_revision")
 
     if verb not in VERB_WHITELIST:
-        json.dump({
-            "committed": False,
-            "reason": "unknown_verb",
-            "verb": verb,
-        }, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 1
+        return _reject(1, "unknown_verb", verb=verb)
 
     spec = VERB_WHITELIST[verb]
 
     if not isinstance(fields, dict):
-        json.dump({
-            "committed": False,
-            "reason": "invalid_verb_payload",
-            "message": "'fields' must be an object",
-        }, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 1
+        return _reject(1, "invalid_verb_payload", message="'fields' must be an object")
 
     if not isinstance(based_on_revision, int):
-        json.dump({
-            "committed": False,
-            "reason": "invalid_verb_payload",
-            "message": "'based_on_revision' must be an integer",
-        }, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 1
+        return _reject(1, "invalid_verb_payload", message="'based_on_revision' must be an integer")
 
     # Validate fields against whitelist
     disallowed = set(fields.keys()) - spec["fields"]
     if disallowed:
-        json.dump({
-            "committed": False,
-            "reason": "field_not_allowed",
-            "verb": verb,
-            "disallowed_fields": sorted(disallowed),
-        }, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 1
+        return _reject(1, "field_not_allowed", verb=verb, disallowed_fields=sorted(disallowed))
 
     if not fields:
-        json.dump({
-            "committed": False,
-            "reason": "no_fields",
-            "verb": verb,
-        }, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 1
+        return _reject(1, "no_fields", verb=verb)
 
     # Read current file
     file_rel = spec["file"]
     file_path = resolve_tx_path(root, file_rel)
 
     if not os.path.exists(file_path):
-        json.dump({
-            "committed": False,
-            "reason": "target_file_missing",
-            "path": file_rel,
-        }, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 1
+        return _reject(1, "target_file_missing", path=file_rel)
 
     with open(file_path, encoding="utf-8") as fh:
         store = json.load(fh)
 
     current_revision = store.get("revision")
     if current_revision != based_on_revision:
-        json.dump({
-            "committed": False,
-            "reason": "stale_revision",
-            "path": file_rel,
-            "expected": based_on_revision,
-            "actual": current_revision,
-        }, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 2
-
-    expected_revision = based_on_revision
+        return _reject(2, "stale_revision", path=file_rel,
+                        expected=based_on_revision, actual=current_revision)
 
     if spec["target_type"] == "work_item":
         if not target:
-            json.dump({
-                "committed": False,
-                "reason": "missing_target",
-                "verb": verb,
-            }, sys.stdout, indent=2)
-            sys.stdout.write("\n")
-            return 1
+            return _reject(1, "missing_target", verb=verb)
 
         items = store.get("items", [])
         wi_index = None
@@ -304,13 +261,7 @@ def _verb_commit(root, verb_input):
                 break
 
         if wi_index is None:
-            json.dump({
-                "committed": False,
-                "reason": "target_not_found",
-                "target": target,
-            }, sys.stdout, indent=2)
-            sys.stdout.write("\n")
-            return 1
+            return _reject(1, "target_not_found", target=target)
 
         # Apply field patches to WI
         for k, v in fields.items():
@@ -325,14 +276,14 @@ def _verb_commit(root, verb_input):
             store[k] = v
 
     # Bump store revision + updated_at
-    store["revision"] = (expected_revision or 0) + 1
+    store["revision"] = (based_on_revision or 0) + 1
     store["updated_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Construct transaction and commit through normal path
     tx = {
         "writes": [{
             "path": file_rel,
-            "expected_revision": expected_revision,
+            "expected_revision": based_on_revision,
             "content": store,
         }],
         "deletes": [],
@@ -531,35 +482,17 @@ def main():
         try:
             tx = json.load(sys.stdin)
         except json.JSONDecodeError as exc:
-            json.dump({
-                "committed": False,
-                "reason": "invalid_transaction",
-                "message": str(exc),
-            }, sys.stdout, indent=2)
-            sys.stdout.write("\n")
-            return 1
+            return _reject(1, "invalid_transaction", message=str(exc))
 
         if not isinstance(tx, dict):
-            json.dump({
-                "committed": False,
-                "reason": "invalid_transaction",
-                "message": "transaction must be a JSON object",
-            }, sys.stdout, indent=2)
-            sys.stdout.write("\n")
-            return 1
+            return _reject(1, "invalid_transaction", message="transaction must be a JSON object")
 
         is_verb = "verb" in tx
         if not is_verb:
             writes = tx.get("writes", [])
             deletes = tx.get("deletes", [])
             if not isinstance(writes, list) or not isinstance(deletes, list):
-                json.dump({
-                    "committed": False,
-                    "reason": "invalid_transaction",
-                    "message": "'writes' and 'deletes' must be lists",
-                }, sys.stdout, indent=2)
-                sys.stdout.write("\n")
-                return 1
+                return _reject(1, "invalid_transaction", message="'writes' and 'deletes' must be lists")
             if not writes and not deletes:
                 print("Empty transaction", file=sys.stderr)
                 return 1
@@ -569,13 +502,7 @@ def main():
                 for d in deletes:
                     resolve_tx_path(root, d)
             except (KeyError, ValueError) as exc:
-                json.dump({
-                    "committed": False,
-                    "reason": "invalid_path",
-                    "message": str(exc),
-                }, sys.stdout, indent=2)
-                sys.stdout.write("\n")
-                return 1
+                return _reject(1, "invalid_path", message=str(exc))
 
     # ── Acquire exclusive lock ────────────────────────────────────────
     # flock serializes concurrent agents so the validate→write window
@@ -609,27 +536,14 @@ def _commit(root, tx, writes, deletes):
         path = resolve_tx_path(root, w["path"])
         current = read_revision(path)
         if current != expected:
-            json.dump({
-                "committed": False,
-                "reason": "stale_revision",
-                "path": w["path"],
-                "expected": expected,
-                "actual": current,
-            }, sys.stdout, indent=2)
-            sys.stdout.write("\n")
-            return 2
+            return _reject(2, "stale_revision", path=w["path"],
+                            expected=expected, actual=current)
 
     # Phase 1b: dependency cycle detection
     if _depends_on_changed(root, writes):
         cycle = _detect_cycles(writes)
         if cycle:
-            json.dump({
-                "committed": False,
-                "reason": "dependency_cycle",
-                "cycle": cycle,
-            }, sys.stdout, indent=2)
-            sys.stdout.write("\n")
-            return 1
+            return _reject(1, "dependency_cycle", cycle=cycle)
 
     # Phase 1c: pre-WAL dependency resolution
     auto_transitioned = _resolve_dependencies(root, writes)
@@ -690,9 +604,7 @@ def _replay(root):
     """
     wal_path = os.path.join(root, ".agent-atelier/.pending-tx.json")
     if not os.path.exists(wal_path):
-        json.dump({"committed": False, "reason": "wal_missing"}, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 4
+        return _reject(4, "wal_missing")
 
     try:
         with open(wal_path, encoding="utf-8") as fh:
