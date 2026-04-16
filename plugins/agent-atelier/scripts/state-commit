@@ -303,12 +303,7 @@ def _resolve_dependencies(root, writes):
 
     Returns list of auto-transitioned WI IDs.
     """
-    wi_write = None
-    for w in writes:
-        if w["path"].endswith("work-items.json"):
-            wi_write = w
-            break
-
+    wi_write = _find_wi_write(writes)
     if wi_write is None:
         return []
 
@@ -360,12 +355,7 @@ def _resolve_dependencies(root, writes):
 
 def _depends_on_changed(root, writes):
     """Return True when this transaction mutates any WI dependency set."""
-    wi_write = None
-    for w in writes:
-        if w["path"].endswith("work-items.json"):
-            wi_write = w
-            break
-
+    wi_write = _find_wi_write(writes)
     if wi_write is None:
         return False
 
@@ -403,12 +393,7 @@ def _detect_cycles(writes):
 
     Returns list of WI IDs forming the cycle, or None if no cycle exists.
     """
-    wi_write = None
-    for w in writes:
-        if w["path"].endswith("work-items.json"):
-            wi_write = w
-            break
-
+    wi_write = _find_wi_write(writes)
     if wi_write is None:
         return None
 
@@ -614,13 +599,7 @@ def _replay(root):
         if not isinstance(writes, list) or not isinstance(deletes, list):
             raise ValueError("WAL transaction must contain list fields: writes, deletes")
     except (OSError, json.JSONDecodeError, ValueError) as exc:
-        json.dump({
-            "committed": False,
-            "reason": "wal_invalid",
-            "message": str(exc),
-        }, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 4
+        return _reject(4, "wal_invalid", message=str(exc))
 
     artifacts = []
     skipped = []
@@ -636,16 +615,8 @@ def _replay(root):
             continue
 
         if expected_rev is not None and current_rev != expected_rev and current_rev != target_rev:
-            json.dump({
-                "committed": False,
-                "reason": "replay_conflict",
-                "path": w["path"],
-                "expected": expected_rev,
-                "target": target_rev,
-                "actual": current_rev,
-            }, sys.stdout, indent=2)
-            sys.stdout.write("\n")
-            return 4
+            return _reject(4, "replay_conflict", path=w["path"],
+                            expected=expected_rev, target=target_rev, actual=current_rev)
 
         atomic_write(path, serialize(w["content"]))
         artifacts.append(w["path"])
