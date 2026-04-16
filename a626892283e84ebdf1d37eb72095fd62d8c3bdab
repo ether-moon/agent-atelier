@@ -1,0 +1,28 @@
+## Decisions Made
+- Applied creating-skills methodology uniformly to all 10 skills: chose to extract detailed procedures into reference/ files rather than inline simplification, preserving full workflow logic while keeping SKILL.md under 200 lines
+- Used parallel sub-agents (10 concurrent) for skill improvement: rationale was that each skill is independent and benefits from focused attention without cross-contamination
+- Removed over-broad triggers ("resume", "continue", "show me the plan", "reset state") after peer review: generic conversational terms would steal unrelated turns in a description-driven skill matcher
+- Changed status recovery guidance from git checkout to init re-run: .agent-atelier/ is gitignored runtime state, git checkout cannot restore it
+- Standardized reference link style to backtick format and TOC style to heading format across all skills for consistency
+
+## Problems Encountered
+- init WAL replay path was hardcoded as plugins/agent-atelier/scripts/state-commit which would fail from subdirectories: resolved by reverting to plugin-root placeholder with CLAUDE_SKILL_DIR note
+- status error handling suggested git checkout on gitignored .agent-atelier/ state: resolved by replacing with idempotent init re-run guidance
+- run/reference/team-lifecycle.md had a 2-hop reference to references/prompts/orchestrator.md: resolved by making the path explicit from repo root
+- init description included "reset state" trigger that contradicts the skill's never-overwrite behavior: resolved by removing the trigger
+
+## Constraints Identified
+- SKILL.md hard ceiling is 500 lines, soft target 200 lines: reference/ files must absorb all overflow while maintaining one-level-deep references only
+- Skills share a description-driven triggering mechanism: overly generic triggers can steal conversational turns from other skills or normal conversation
+
+## Open Questions
+- None
+
+## Context
+Improved all 10 agent-atelier plugin skills (candidate, execute, gate, init, monitors, run, status, validate, watchdog, wi) using the creating-skills methodology. Dispatched 10 parallel sub-agents for initial improvements, then ran a 3-CLI peer review (Gemini, Codex, Claude) that identified 7 issues. All 7 issues were resolved: 5 obvious auto-fixes and 2 ambiguous items fixed per recommended best practices. Net result: 449 insertions, 1145 deletions across SKILL.md files plus 8 new reference files.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
