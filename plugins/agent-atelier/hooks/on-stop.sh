@@ -69,12 +69,12 @@ with open(sys.argv[1]) as f:
 " "$LOOP_STATE" 2>/dev/null || echo "")
 fi
 
-# Fallback: search for any agent-atelier-* team directory
+# Fallback: search for any atelier-* team directory (session-scoped naming)
 if [[ -z "$TEAM_NAME" ]]; then
   TEAMS_BASE="$HOME/.claude/teams"
   if [[ -d "$TEAMS_BASE" ]]; then
     shopt -s nullglob
-    for d in "$TEAMS_BASE"/agent-atelier-*; do
+    for d in "$TEAMS_BASE"/atelier-*; do
       if [[ -d "$d" ]]; then
         TEAM_NAME=$(basename "$d")
         break
