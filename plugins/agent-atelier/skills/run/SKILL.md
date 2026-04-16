@@ -90,7 +90,7 @@ The **Orchestrator** role is played by the lead agent (you) — do not spawn a s
 | Role | Agent Type | When to Spawn | When to Shutdown | Model |
 |------|-----------|--------------|------------------|-------|
 | Builder(s) | `builder` | WI enters `ready` and BUILD_PLAN/IMPLEMENT phase | After WI completion or requeue | `sonnet` |
-| VRM | `vrm` | Candidate enters `active_candidate` | After evidence bundle produced | `sonnet` |
+| VRM | `vrm` | Candidate enters `active_candidate_set` | After evidence bundle produced | `sonnet` |
 | QA Reviewer | `qa-reviewer` | REVIEW_SYNTHESIS phase begins | After findings submitted | `sonnet` |
 | UX Reviewer | `ux-reviewer` | REVIEW_SYNTHESIS phase begins | After findings submitted | `sonnet` |
 
@@ -103,7 +103,8 @@ Shut down via `SendMessage({type: "shutdown_request"})` when their phase ends.
 
 When spawning a Builder for a work item, check the WI's `complexity` field in `work-items.json`:
 
-- **`simple`** (default): Spawn with `mode: "acceptEdits"`. Builder implements immediately.
+- **`null`**: Complexity not yet set. The Architect must set it before the WI can proceed. If encountered at spawn time, reject with an error directing the Architect to set complexity.
+- **`simple`**: Spawn with `mode: "acceptEdits"`. Builder implements immediately.
 - **`complex`**: Spawn with `mode: "plan"`. The Builder starts in read-only plan mode — Write/Edit tools are blocked by the harness. The Builder proposes a plan, calls `ExitPlanMode`, which sends a structured `plan_approval_request` to the Orchestrator. After `plan_approval_response(approve: true)`, the Builder's permission mode auto-transitions to `bypassPermissions` for implementation.
 
 For complex WIs: `"Spawn a teammate using the builder agent type to implement WI-014"` with `mode: "plan"`. The plan approval flow is mechanical — no prompt instruction needed. See the Orchestrator's Plan Review Protocol for approval criteria.
@@ -204,8 +205,9 @@ All mode transitions are explicit — the Orchestrator directs the State Manager
 | SPEC_DRAFT | SPEC_HARDEN | First complete draft exists |
 | SPEC_HARDEN | BUILD_PLAN | Spec stable — no open challenges |
 | BUILD_PLAN | IMPLEMENT | WIs created, at least one `ready` |
-| IMPLEMENT | VALIDATE | `active_candidate` set |
-| VALIDATE | REVIEW_SYNTHESIS | Validation passed |
+| IMPLEMENT | VALIDATE | `active_candidate_set` set |
+| VALIDATE | IMPLEMENT | VRM passed + fast-track conditions met → skip review |
+| VALIDATE | REVIEW_SYNTHESIS | VRM passed + fast-track not met → full review |
 | VALIDATE | IMPLEMENT | Validation failed |
 | REVIEW_SYNTHESIS | AUTOFIX | Bugs found |
 | REVIEW_SYNTHESIS | SPEC_DRAFT | Spec gaps found |
@@ -237,19 +239,35 @@ All mode transitions are explicit — the Orchestrator directs the State Manager
 ### BUILD_PLAN
 - **Actors:** Architect
 - **Activity:** Architect decomposes spec into vertical-slice work items via `wi upsert`
-- **Transition:** → IMPLEMENT when all WIs are created and at least one is `ready`
+- **Verify hard gate:** Before transitioning to IMPLEMENT, verify ALL `ready` WIs have `verify.length >= 1`. If any WI has an empty verify array, reject the transition and report the WI IDs. The Architect must add verify items before the loop can proceed.
+- **Complexity requirement:** The Architect must set `complexity` on every WI (default is `null`). WIs with `null` complexity cannot qualify for fast-track review.
+- **Transition:** → IMPLEMENT when all WIs are created, at least one is `ready`, and the verify hard gate passes
 
 ### IMPLEMENT
 - **Actors:** Builder(s), Architect (support)
 - **Activity:** Builders claim WIs, implement in worktrees, produce atomic commits
 - **On candidate ready:** Builder signals completion → `candidate enqueue` → continue to next WI
-- **Transition:** → VALIDATE when `active_candidate` is set (can overlap with ongoing implementation)
+- **Transition:** → VALIDATE when `active_candidate_set` is set (can overlap with ongoing implementation)
 
 ### VALIDATE
 - **Actors:** VRM
-- **Activity:** VRM runs full validation suite against `active_candidate`, produces evidence bundle
+- **Activity:** VRM runs full validation suite against `active_candidate_set`, produces evidence bundle
 - **Information barrier:** VRM input from `build-vrm-prompt` only — no Builder context
-- **On result:** `validate record` → if passed, → REVIEW_SYNTHESIS; if failed, → back to IMPLEMENT
+- **On result:** `validate record` → if passed, evaluate fast-track; if failed, → back to IMPLEMENT
+
+#### Fast-Track Review
+
+When VRM passes, check whether the candidate set qualifies for fast-track (skip REVIEW_SYNTHESIS). **ALL conditions must be met** (per-batch, conservative):
+
+1. Every WI in `active_candidate_set` has `complexity == "simple"`
+2. VRM `status == "passed"`
+3. Total diff (from candidate branch) is ≤ 30 lines
+4. No WI's `owned_paths` contains auth, payment, schema-migration, or public-api paths
+
+If all conditions met: → IMPLEMENT (skip review, proceed to complete or next WI)
+If any condition not met: → REVIEW_SYNTHESIS (full review cycle)
+
+`complexity == null` always disqualifies fast-track — the Architect must explicitly set complexity.
 
 ### REVIEW_SYNTHESIS
 - **Actors:** QA Reviewer, UX Reviewer, PM
@@ -300,7 +318,7 @@ On cold resume, the Orchestrator reads this file to restore review state. If a W
 ### DONE
 All WIs complete with evidence. Execute the team cleanup checklist in order:
 
-1. **Verify completion:** Confirm all WIs have status `done` and `active_candidate` is null.
+1. **Verify completion:** Confirm all WIs have status `done` and `active_candidate_set` is null.
 2. **Stop monitors:** Stop all monitors via `/agent-atelier:monitors stop all`.
 3. **Cancel cron jobs:** `CronDelete` both the stored monitor poll job ID and the stored watchdog recovery job ID.
 4. **Shutdown teammates:** Send `SendMessage({type: "shutdown_request"})` to each active teammate. Wait for all to reach idle/stopped state.
@@ -324,7 +342,7 @@ All WIs complete with evidence. Execute the team cleanup checklist in order:
 After executing the cleanup checklist, verify each step actually succeeded before reporting to the user:
 
 **Primary success conditions** (all must pass):
-1. Re-read `work-items.json` — confirm zero non-`done` items and `active_candidate` is null.
+1. Re-read `work-items.json` and `loop-state.json` — confirm zero non-`done` items and `active_candidate_set` is null.
 2. Call `CronList` — confirm no remaining orchestration cron jobs (monitor poll or watchdog recovery). If any exist, `CronDelete` them.
 3. Team cleanup completed successfully — the lead executed cleanup and no active teammates remain.
 

@@ -51,8 +51,8 @@ cat > "$TMPDIR/.agent-atelier/loop-state.json" <<'EOF'
   "updated_at": "2026-04-08T00:00:00Z",
   "mode": "IMPLEMENT",
   "open_gates": [],
-  "active_candidate": null,
-  "candidate_activated_at": null
+  "active_candidate_set": null,
+  "candidate_queue": []
 }
 EOF
 
@@ -123,8 +123,8 @@ RESULT=$(echo '{
         "updated_at": "2026-04-08T02:00:00Z",
         "mode": "VALIDATE",
         "open_gates": [],
-        "active_candidate": {"work_item_id": "WI-001", "branch": "candidate/WI-001"},
-        "candidate_activated_at": "2026-04-08T02:00:00Z"
+        "active_candidate_set": {"id": "CS-001", "work_item_ids": ["WI-001"], "branch": "candidate/WI-001", "commit": "abc1234", "type": "single", "activated_at": "2026-04-08T02:00:00Z"},
+        "candidate_queue": []
       }
     }
   ]
@@ -137,7 +137,7 @@ else
 fi
 
 assert_json "$TMPDIR/.agent-atelier/work-items.json" "data['revision'] == 3"
-assert_json "$TMPDIR/.agent-atelier/loop-state.json" "data['revision'] == 2 and data['active_candidate']['work_item_id'] == 'WI-001'"
+assert_json "$TMPDIR/.agent-atelier/loop-state.json" "data['revision'] == 2 and data['active_candidate_set']['work_item_ids'] == ['WI-001']"
 pass "Cross-file state is consistent after multi-file transaction"
 
 # ── Test 4: Multi-file tx rejected if ANY revision is stale ──────────
@@ -267,8 +267,8 @@ cat > "$WAL_PATH" <<'EOF'
         "updated_at": "2026-04-08T04:00:00Z",
         "mode": "IMPLEMENT",
         "open_gates": [],
-        "active_candidate": null,
-        "candidate_activated_at": null
+        "active_candidate_set": null,
+        "candidate_queue": []
       }
     }
   ]
@@ -545,6 +545,325 @@ if [ -f "$EVENTS_FILE" ]; then
   fi
 else
   pass "No event emitted for rejected commit (no events file)"
+fi
+
+# ══════════════════════════════════════════════════════════════════════
+# v0.2 Tests: verb mode, dependency resolver, cycle detection
+# ══════════════════════════════════════════════════════════════════════
+
+echo ""
+echo "=== v0.2 Verb Mode Tests ==="
+
+# Reset state for verb tests
+cat > "$TMPDIR/.agent-atelier/work-items.json" <<'EOF'
+{
+  "revision": 10,
+  "updated_at": "2026-04-08T10:00:00Z",
+  "items": [
+    {"id": "WI-010", "status": "implementing", "revision": 1, "title": "Verb test", "last_heartbeat_at": null, "lease_expires_at": null}
+  ]
+}
+EOF
+
+# ── Test 17: Verb heartbeat — allowed fields pass ────────────────
+RESULT=$(echo '{
+  "verb": "heartbeat",
+  "target": "WI-010",
+  "fields": {"last_heartbeat_at": "2026-04-08T12:00:00Z", "lease_expires_at": "2026-04-08T13:30:00Z"}
+}' | "$COMMIT" --root "$TMPDIR")
+
+if echo "$RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['committed'] is True" 2>/dev/null; then
+  pass "Verb heartbeat: allowed fields commit"
+else
+  fail "Verb heartbeat: allowed fields rejected"
+fi
+
+assert_json "$TMPDIR/.agent-atelier/work-items.json" "data['items'][0]['last_heartbeat_at'] == '2026-04-08T12:00:00Z'"
+pass "Verb heartbeat: field value applied correctly"
+
+assert_json "$TMPDIR/.agent-atelier/work-items.json" "data['revision'] == 11"
+pass "Verb heartbeat: store revision bumped"
+
+assert_json "$TMPDIR/.agent-atelier/work-items.json" "data['items'][0]['revision'] == 2"
+pass "Verb heartbeat: WI revision bumped"
+
+# ── Test 18: Verb heartbeat — disallowed field rejected ──────────
+RESULT=$(echo '{
+  "verb": "heartbeat",
+  "target": "WI-010",
+  "fields": {"status": "done", "last_heartbeat_at": "2026-04-08T12:00:00Z"}
+}' | "$COMMIT" --root "$TMPDIR" 2>/dev/null; echo "EXIT:$?")
+
+if echo "$RESULT" | grep -q '"field_not_allowed"'; then
+  pass "Verb heartbeat: disallowed field 'status' rejected"
+else
+  fail "Verb heartbeat: disallowed field was not rejected"
+fi
+
+if echo "$RESULT" | grep -q 'EXIT:1'; then
+  pass "Verb heartbeat: disallowed field exits with code 1"
+else
+  fail "Verb heartbeat: disallowed field did not exit with code 1"
+fi
+
+# Verify state unchanged
+assert_json "$TMPDIR/.agent-atelier/work-items.json" "data['items'][0]['status'] == 'implementing'"
+pass "Verb heartbeat: state unchanged after disallowed field rejection"
+
+# ── Test 19: Verb record-attempt — allowed fields pass ───────────
+RESULT=$(echo '{
+  "verb": "record-attempt",
+  "target": "WI-010",
+  "fields": {"attempt_count": 3, "last_attempt_ref": "attempt-003.json", "last_finding_fingerprint": "fp-abc"}
+}' | "$COMMIT" --root "$TMPDIR")
+
+if echo "$RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['committed'] is True" 2>/dev/null; then
+  pass "Verb record-attempt: allowed fields commit"
+else
+  fail "Verb record-attempt: allowed fields rejected"
+fi
+
+assert_json "$TMPDIR/.agent-atelier/work-items.json" "data['items'][0]['attempt_count'] == 3"
+pass "Verb record-attempt: field value applied correctly"
+
+# ── Test 20: Unknown verb rejected ───────────────────────────────
+RESULT=$(echo '{
+  "verb": "delete-everything",
+  "target": "WI-010",
+  "fields": {"status": "done"}
+}' | "$COMMIT" --root "$TMPDIR" 2>/dev/null; echo "EXIT:$?")
+
+if echo "$RESULT" | grep -q '"unknown_verb"'; then
+  pass "Unknown verb rejected"
+else
+  fail "Unknown verb was not rejected"
+fi
+
+# ── Test 21: Verb with empty fields rejected ─────────────────────
+RESULT=$(echo '{
+  "verb": "heartbeat",
+  "target": "WI-010",
+  "fields": {}
+}' | "$COMMIT" --root "$TMPDIR" 2>/dev/null; echo "EXIT:$?")
+
+if echo "$RESULT" | grep -q '"no_fields"'; then
+  pass "Verb with empty fields rejected"
+else
+  fail "Verb with empty fields was not rejected"
+fi
+
+# ── Test 22: Verb target not found ───────────────────────────────
+RESULT=$(echo '{
+  "verb": "heartbeat",
+  "target": "WI-NONEXISTENT",
+  "fields": {"last_heartbeat_at": "2026-04-08T12:00:00Z"}
+}' | "$COMMIT" --root "$TMPDIR" 2>/dev/null; echo "EXIT:$?")
+
+if echo "$RESULT" | grep -q '"target_not_found"'; then
+  pass "Verb target not found rejected"
+else
+  fail "Verb target not found was not rejected"
+fi
+
+# ── Test 23: watchdog-tick-meta verb (store-level) ───────────────
+cat > "$TMPDIR/.agent-atelier/watchdog-jobs.json" <<'EOF'
+{
+  "revision": 1,
+  "updated_at": "2026-04-08T10:00:00Z",
+  "open_alerts": [],
+  "last_tick_at": null
+}
+EOF
+
+RESULT=$(echo '{
+  "verb": "watchdog-tick-meta",
+  "target": null,
+  "fields": {"open_alerts": ["alert-001"], "last_tick_at": "2026-04-08T14:00:00Z"}
+}' | "$COMMIT" --root "$TMPDIR")
+
+if echo "$RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['committed'] is True" 2>/dev/null; then
+  pass "Verb watchdog-tick-meta: store-level fields commit"
+else
+  fail "Verb watchdog-tick-meta: store-level fields rejected"
+fi
+
+assert_json "$TMPDIR/.agent-atelier/watchdog-jobs.json" "data['open_alerts'] == ['alert-001'] and data['last_tick_at'] == '2026-04-08T14:00:00Z'"
+pass "Verb watchdog-tick-meta: store-level fields applied correctly"
+
+echo ""
+echo "=== v0.2 Dependency Resolver Tests ==="
+
+# ── Test 24: done transition → pending auto-ready ────────────────
+cat > "$TMPDIR/.agent-atelier/work-items.json" <<'EOF'
+{
+  "revision": 20,
+  "updated_at": "2026-04-08T20:00:00Z",
+  "items": [
+    {"id": "WI-A", "status": "implementing", "revision": 1, "depends_on": []},
+    {"id": "WI-B", "status": "pending", "revision": 1, "depends_on": ["WI-A"]},
+    {"id": "WI-C", "status": "pending", "revision": 1, "depends_on": ["WI-A", "WI-B"]}
+  ]
+}
+EOF
+
+RESULT=$(echo '{
+  "writes": [{
+    "path": ".agent-atelier/work-items.json",
+    "expected_revision": 20,
+    "content": {
+      "revision": 21,
+      "updated_at": "2026-04-08T21:00:00Z",
+      "items": [
+        {"id": "WI-A", "status": "done", "revision": 2, "depends_on": []},
+        {"id": "WI-B", "status": "pending", "revision": 1, "depends_on": ["WI-A"]},
+        {"id": "WI-C", "status": "pending", "revision": 1, "depends_on": ["WI-A", "WI-B"]}
+      ]
+    }
+  }]
+}' | "$COMMIT" --root "$TMPDIR")
+
+if echo "$RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['committed'] is True" 2>/dev/null; then
+  pass "Dependency resolver: transaction commits"
+else
+  fail "Dependency resolver: transaction rejected"
+fi
+
+# WI-B should be auto-transitioned to ready (all deps done)
+assert_json "$TMPDIR/.agent-atelier/work-items.json" "data['items'][1]['status'] == 'ready'"
+pass "Dependency resolver: WI-B auto-transitioned pending→ready"
+
+# WI-C should remain pending (WI-B not done yet)
+assert_json "$TMPDIR/.agent-atelier/work-items.json" "data['items'][2]['status'] == 'pending'"
+pass "Dependency resolver: WI-C remains pending (WI-B not done)"
+
+# WI-B revision should be bumped
+assert_json "$TMPDIR/.agent-atelier/work-items.json" "data['items'][1]['revision'] == 2"
+pass "Dependency resolver: auto-transitioned WI revision bumped"
+
+# ── Test 25: blocked_on_human_gate protected from auto-transition ─
+cat > "$TMPDIR/.agent-atelier/work-items.json" <<'EOF'
+{
+  "revision": 25,
+  "updated_at": "2026-04-08T10:00:00Z",
+  "items": [
+    {"id": "WI-D", "status": "implementing", "revision": 1, "depends_on": []},
+    {"id": "WI-E", "status": "blocked_on_human_gate", "revision": 1, "depends_on": ["WI-D"], "blocked_by_gate": "HDR-001"}
+  ]
+}
+EOF
+
+RESULT=$(echo '{
+  "writes": [{
+    "path": ".agent-atelier/work-items.json",
+    "expected_revision": 25,
+    "content": {
+      "revision": 26,
+      "updated_at": "2026-04-08T11:00:00Z",
+      "items": [
+        {"id": "WI-D", "status": "done", "revision": 2, "depends_on": []},
+        {"id": "WI-E", "status": "blocked_on_human_gate", "revision": 1, "depends_on": ["WI-D"], "blocked_by_gate": "HDR-001"}
+      ]
+    }
+  }]
+}' | "$COMMIT" --root "$TMPDIR")
+
+if echo "$RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['committed'] is True" 2>/dev/null; then
+  pass "Gate protection: transaction commits"
+else
+  fail "Gate protection: transaction rejected"
+fi
+
+# WI-E should NOT be auto-transitioned (blocked_on_human_gate overrides)
+assert_json "$TMPDIR/.agent-atelier/work-items.json" "data['items'][1]['status'] == 'blocked_on_human_gate'"
+pass "Gate protection: blocked_on_human_gate WI not auto-transitioned"
+
+echo ""
+echo "=== v0.2 Cycle Detection Tests ==="
+
+# ── Test 26: A→B→A cycle rejected ────────────────────────────────
+cat > "$TMPDIR/.agent-atelier/work-items.json" <<'EOF'
+{
+  "revision": 30,
+  "updated_at": "2026-04-08T10:00:00Z",
+  "items": []
+}
+EOF
+
+RESULT=$(echo '{
+  "writes": [{
+    "path": ".agent-atelier/work-items.json",
+    "expected_revision": 30,
+    "content": {
+      "revision": 31,
+      "updated_at": "2026-04-08T11:00:00Z",
+      "items": [
+        {"id": "WI-X", "status": "pending", "revision": 1, "depends_on": ["WI-Y"]},
+        {"id": "WI-Y", "status": "pending", "revision": 1, "depends_on": ["WI-X"]}
+      ]
+    }
+  }]
+}' | "$COMMIT" --root "$TMPDIR" 2>/dev/null; echo "EXIT:$?")
+
+if echo "$RESULT" | grep -q '"dependency_cycle"'; then
+  pass "Cycle detection: A→B→A rejected"
+else
+  fail "Cycle detection: A→B→A was not rejected"
+fi
+
+if echo "$RESULT" | grep -q 'EXIT:1'; then
+  pass "Cycle detection: exits with code 1"
+else
+  fail "Cycle detection: did not exit with code 1"
+fi
+
+# State should be unchanged
+assert_json "$TMPDIR/.agent-atelier/work-items.json" "data['revision'] == 30"
+pass "Cycle detection: state unchanged after rejection"
+
+# ── Test 27: No cycle — linear chain passes ──────────────────────
+RESULT=$(echo '{
+  "writes": [{
+    "path": ".agent-atelier/work-items.json",
+    "expected_revision": 30,
+    "content": {
+      "revision": 31,
+      "updated_at": "2026-04-08T11:00:00Z",
+      "items": [
+        {"id": "WI-P", "status": "pending", "revision": 1, "depends_on": []},
+        {"id": "WI-Q", "status": "pending", "revision": 1, "depends_on": ["WI-P"]},
+        {"id": "WI-R", "status": "pending", "revision": 1, "depends_on": ["WI-Q"]}
+      ]
+    }
+  }]
+}' | "$COMMIT" --root "$TMPDIR")
+
+if echo "$RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['committed'] is True" 2>/dev/null; then
+  pass "No cycle: linear chain P→Q→R commits"
+else
+  fail "No cycle: linear chain was rejected"
+fi
+
+# ── Test 28: 3-node cycle A→B→C→A rejected ──────────────────────
+RESULT=$(echo '{
+  "writes": [{
+    "path": ".agent-atelier/work-items.json",
+    "expected_revision": 31,
+    "content": {
+      "revision": 32,
+      "updated_at": "2026-04-08T12:00:00Z",
+      "items": [
+        {"id": "WI-1", "status": "pending", "revision": 1, "depends_on": ["WI-3"]},
+        {"id": "WI-2", "status": "pending", "revision": 1, "depends_on": ["WI-1"]},
+        {"id": "WI-3", "status": "pending", "revision": 1, "depends_on": ["WI-2"]}
+      ]
+    }
+  }]
+}' | "$COMMIT" --root "$TMPDIR" 2>/dev/null; echo "EXIT:$?")
+
+if echo "$RESULT" | grep -q '"dependency_cycle"'; then
+  pass "Cycle detection: 3-node A→B→C→A rejected"
+else
+  fail "Cycle detection: 3-node cycle was not rejected"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────

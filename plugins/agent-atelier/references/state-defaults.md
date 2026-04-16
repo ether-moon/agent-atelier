@@ -12,8 +12,7 @@ When initializing state files, use these exact defaults. Timestamps should be UT
   "active_spec": "docs/product/behavior-spec.md",
   "active_spec_revision": 1,
   "open_gates": [],
-  "active_candidate": null,
-  "candidate_activated_at": null,
+  "active_candidate_set": null,
   "candidate_queue": [],
   "team_name": null,
   "next_action": {

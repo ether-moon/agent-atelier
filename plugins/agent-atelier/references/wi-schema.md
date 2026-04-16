@@ -20,7 +20,7 @@ Every work item has these fields. Missing fields get the defaults shown below.
   "owner_role": "builder",
   "owner_session_id": null,
   "depends_on": [],
-  "complexity": "simple",
+  "complexity": null,
   "behaviors": [],
   "input_artifacts": [],
   "owned_paths": [],
@@ -51,7 +51,9 @@ Every work item has these fields. Missing fields get the defaults shown below.
 
 ## Valid Complexity Values
 
-`simple` | `complex`
+`null` | `"simple"` | `"complex"`
+
+Default is `null`. A `null` complexity means the Architect has not yet assessed it. WIs with `null` complexity cannot qualify for fast-track review.
 
 ## Normalization Rules
 
@@ -82,10 +84,16 @@ When status is NOT `blocked_on_human_gate` and the caller did not explicitly set
 Increment the work item's `revision` by 1 on every write.
 
 ### 7. Complexity field
-`complexity` must be one of `simple` or `complex`. If null or missing, default to `"simple"`. Reject any other value.
+`complexity` must be one of `null`, `"simple"`, or `"complex"`. Default is `null`. The Architect must explicitly set complexity on every WI during BUILD_PLAN. Reject any value other than `null`, `"simple"`, or `"complex"`.
 
 ### 8. depends_on immutability
 `depends_on` is immutable after the initial upsert. If a work item already exists and has a non-empty `depends_on`, reject any upsert that changes its value. This prevents native task dependency drift — the Agent Teams API supports `addBlockedBy` but not removal, so stale blockers cannot be cleaned up. If dependency restructuring is needed, the Architect should create a new WI with the correct dependencies and retire the old one.
+
+### 9. Dependency cycle prohibition
+`depends_on` must not form cycles. On every upsert that sets `depends_on`, state-commit runs a DFS cycle check across all WIs. If a cycle is detected, the transaction is rejected with exit 1 and the cycle path is reported.
+
+### 10. Verify scope
+Each entry in `verify` must be verifiable within the WI's `owned_paths` scope. This is enforced at the prompt level: the Architect must ensure verify items target paths the WI owns, and the PM cross-validates during SPEC_HARDEN.
 
 ## Upsert Merge Logic
 

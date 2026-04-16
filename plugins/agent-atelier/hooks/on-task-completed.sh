@@ -35,9 +35,9 @@ PY
 )
 
 if [[ -n "$IMPLEMENTING_WITHOUT_TESTS" ]]; then
-  echo "WARNING: Work items $IMPLEMENTING_WITHOUT_TESTS are implementing with no verify checks defined."
-  echo "Consider adding verify checks to ensure testable completion criteria."
-  # Warn but don't block — loose v1
+  echo "BLOCKED: Work items $IMPLEMENTING_WITHOUT_TESTS are implementing with no verify checks defined."
+  echo "Every WI must have at least one verify entry before completion. Add verify checks via /agent-atelier:wi upsert."
+  exit 2
 fi
 
 # Check for validation manifests if any WI is in reviewing/done status

@@ -42,6 +42,34 @@ import sys
 import tempfile
 
 
+# ── Verb whitelist (data-plane) ─────────────────────────────────
+# Each verb declares its target file, target type, and the exact
+# set of fields it may modify.  Any field outside the whitelist
+# causes an immediate rejection (exit 1).
+VERB_WHITELIST = {
+    "heartbeat": {
+        "file": ".agent-atelier/work-items.json",
+        "target_type": "work_item",
+        "fields": frozenset({"last_heartbeat_at", "lease_expires_at"}),
+    },
+    "record-attempt": {
+        "file": ".agent-atelier/work-items.json",
+        "target_type": "work_item",
+        "fields": frozenset({"attempt_count", "last_attempt_ref", "last_finding_fingerprint"}),
+    },
+    "record-requeue-meta": {
+        "file": ".agent-atelier/work-items.json",
+        "target_type": "work_item",
+        "fields": frozenset({"stale_requeue_count", "last_requeue_reason"}),
+    },
+    "watchdog-tick-meta": {
+        "file": ".agent-atelier/watchdog-jobs.json",
+        "target_type": "store",
+        "fields": frozenset({"open_alerts", "last_tick_at"}),
+    },
+}
+
+
 def resolve_root(explicit):
     if explicit:
         return os.path.realpath(explicit)
@@ -157,6 +185,254 @@ def _emit_event(root, tx, artifacts):
         print(f"state-commit: event emit failed: {exc}", file=sys.stderr)
 
 
+def _verb_commit(root, verb_input):
+    """Verb mode: data-plane write with field whitelist validation.
+
+    Reads the target file, validates verb+fields against the whitelist,
+    applies the patch, bumps revisions, then delegates to _commit for
+    WAL-based atomic write.
+    """
+    verb = verb_input.get("verb")
+    target = verb_input.get("target")
+    fields = verb_input.get("fields", {})
+
+    if verb not in VERB_WHITELIST:
+        json.dump({
+            "committed": False,
+            "reason": "unknown_verb",
+            "verb": verb,
+        }, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 1
+
+    spec = VERB_WHITELIST[verb]
+
+    # Validate fields against whitelist
+    disallowed = set(fields.keys()) - spec["fields"]
+    if disallowed:
+        json.dump({
+            "committed": False,
+            "reason": "field_not_allowed",
+            "verb": verb,
+            "disallowed_fields": sorted(disallowed),
+        }, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 1
+
+    if not fields:
+        json.dump({
+            "committed": False,
+            "reason": "no_fields",
+            "verb": verb,
+        }, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 1
+
+    # Read current file
+    file_rel = spec["file"]
+    file_path = resolve_tx_path(root, file_rel)
+
+    if not os.path.exists(file_path):
+        json.dump({
+            "committed": False,
+            "reason": "target_file_missing",
+            "path": file_rel,
+        }, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 1
+
+    with open(file_path, encoding="utf-8") as fh:
+        store = json.load(fh)
+
+    expected_revision = store.get("revision")
+
+    if spec["target_type"] == "work_item":
+        if not target:
+            json.dump({
+                "committed": False,
+                "reason": "missing_target",
+                "verb": verb,
+            }, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 1
+
+        items = store.get("items", [])
+        wi_index = None
+        for i, item in enumerate(items):
+            if item.get("id") == target:
+                wi_index = i
+                break
+
+        if wi_index is None:
+            json.dump({
+                "committed": False,
+                "reason": "target_not_found",
+                "target": target,
+            }, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 1
+
+        # Apply field patches to WI
+        for k, v in fields.items():
+            store["items"][wi_index][k] = v
+
+        # Bump WI revision
+        store["items"][wi_index]["revision"] = store["items"][wi_index].get("revision", 0) + 1
+
+    elif spec["target_type"] == "store":
+        # Apply field patches at store level
+        for k, v in fields.items():
+            store[k] = v
+
+    # Bump store revision + updated_at
+    store["revision"] = (expected_revision or 0) + 1
+    store["updated_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Construct transaction and commit through normal path
+    tx = {
+        "writes": [{
+            "path": file_rel,
+            "expected_revision": expected_revision,
+            "content": store,
+        }],
+        "deletes": [],
+        "message": f"verb:{verb} target:{target or 'store'}",
+    }
+
+    return _commit(root, tx, tx["writes"], tx["deletes"])
+
+
+def _resolve_dependencies(root, writes):
+    """Pre-WAL: auto-transition pending WIs to ready when all deps are done.
+
+    Compares the new state (in the transaction) against the current on-disk
+    state to find WIs that are newly transitioning to 'done'.  For each
+    'pending' WI whose entire depends_on set is now 'done', mutates its
+    status to 'ready' in-place (same transaction).
+
+    Returns list of auto-transitioned WI IDs.
+    """
+    wi_write = None
+    for w in writes:
+        if w["path"].endswith("work-items.json"):
+            wi_write = w
+            break
+
+    if wi_write is None:
+        return []
+
+    new_content = wi_write["content"]
+    if not isinstance(new_content, dict):
+        return []
+
+    new_items = new_content.get("items", [])
+    if not new_items:
+        return []
+
+    # Read old state to identify newly-done WIs
+    old_path = resolve_tx_path(root, wi_write["path"])
+    old_status = {}
+    if os.path.exists(old_path):
+        with open(old_path, encoding="utf-8") as fh:
+            old_data = json.load(fh)
+        for item in old_data.get("items", []):
+            old_status[item["id"]] = item.get("status")
+
+    # Check if any WI newly transitioned to done
+    newly_done = False
+    for item in new_items:
+        if item.get("status") == "done" and old_status.get(item["id"]) != "done":
+            newly_done = True
+            break
+
+    if not newly_done:
+        return []
+
+    # Build new status map
+    new_status = {item["id"]: item.get("status") for item in new_items}
+
+    # Find pending WIs whose all deps are now done
+    transitioned = []
+    for item in new_items:
+        if item.get("status") != "pending":
+            continue
+        deps = item.get("depends_on", [])
+        if not deps:
+            continue
+        if all(new_status.get(dep) == "done" for dep in deps):
+            item["status"] = "ready"
+            item["revision"] = item.get("revision", 0) + 1
+            transitioned.append(item["id"])
+
+    return transitioned
+
+
+def _detect_cycles(writes):
+    """Check for dependency cycles in work-items.json.
+
+    Returns list of WI IDs forming the cycle, or None if no cycle exists.
+    """
+    wi_write = None
+    for w in writes:
+        if w["path"].endswith("work-items.json"):
+            wi_write = w
+            break
+
+    if wi_write is None:
+        return None
+
+    content = wi_write["content"]
+    if not isinstance(content, dict):
+        return None
+
+    items = content.get("items", [])
+    if not items:
+        return None
+
+    # Build adjacency: WI → its dependencies
+    graph = {}
+    all_ids = set()
+    for item in items:
+        wi_id = item.get("id")
+        all_ids.add(wi_id)
+        deps = item.get("depends_on", [])
+        if deps:
+            graph[wi_id] = deps
+
+    if not graph:
+        return None
+
+    # DFS cycle detection (three-color algorithm)
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = {wi_id: WHITE for wi_id in all_ids}
+    path = []
+
+    def dfs(node):
+        color[node] = GRAY
+        path.append(node)
+        for dep in graph.get(node, []):
+            if dep not in color:
+                continue  # dangling ref — not a WI in this store
+            if color[dep] == GRAY:
+                cycle_start = path.index(dep)
+                return path[cycle_start:] + [dep]
+            if color[dep] == WHITE:
+                result = dfs(dep)
+                if result:
+                    return result
+        path.pop()
+        color[node] = BLACK
+        return None
+
+    for node in list(all_ids):
+        if color[node] == WHITE:
+            cycle = dfs(node)
+            if cycle:
+                return cycle
+
+    return None
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(prog="state-commit")
@@ -169,6 +445,7 @@ def main():
     tx = None
     writes = []
     deletes = []
+    is_verb = False
 
     if not args.replay:
         try:
@@ -182,24 +459,26 @@ def main():
             sys.stdout.write("\n")
             return 1
 
-        writes = tx.get("writes", [])
-        deletes = tx.get("deletes", [])
-        if not writes and not deletes:
-            print("Empty transaction", file=sys.stderr)
-            return 1
-        try:
-            for w in writes:
-                resolve_tx_path(root, w["path"])
-            for d in deletes:
-                resolve_tx_path(root, d)
-        except (KeyError, ValueError) as exc:
-            json.dump({
-                "committed": False,
-                "reason": "invalid_path",
-                "message": str(exc),
-            }, sys.stdout, indent=2)
-            sys.stdout.write("\n")
-            return 1
+        is_verb = "verb" in tx
+        if not is_verb:
+            writes = tx.get("writes", [])
+            deletes = tx.get("deletes", [])
+            if not writes and not deletes:
+                print("Empty transaction", file=sys.stderr)
+                return 1
+            try:
+                for w in writes:
+                    resolve_tx_path(root, w["path"])
+                for d in deletes:
+                    resolve_tx_path(root, d)
+            except (KeyError, ValueError) as exc:
+                json.dump({
+                    "committed": False,
+                    "reason": "invalid_path",
+                    "message": str(exc),
+                }, sys.stdout, indent=2)
+                sys.stdout.write("\n")
+                return 1
 
     # ── Acquire exclusive lock ────────────────────────────────────────
     # flock serializes concurrent agents so the validate→write window
@@ -213,6 +492,8 @@ def main():
 
         if args.replay:
             return _replay(root)
+        elif is_verb:
+            return _verb_commit(root, tx)
         else:
             return _commit(root, tx, writes, deletes)
     finally:
@@ -240,6 +521,23 @@ def _commit(root, tx, writes, deletes):
             }, sys.stdout, indent=2)
             sys.stdout.write("\n")
             return 2
+
+    # Phase 1b: dependency cycle detection
+    cycle = _detect_cycles(writes)
+    if cycle:
+        json.dump({
+            "committed": False,
+            "reason": "dependency_cycle",
+            "cycle": cycle,
+        }, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 1
+
+    # Phase 1c: pre-WAL dependency resolution
+    auto_transitioned = _resolve_dependencies(root, writes)
+    if auto_transitioned:
+        print(f"state-commit: auto-transitioned {auto_transitioned} pending→ready",
+              file=sys.stderr)
 
     # Phase 2: write WAL
     wal_path = os.path.join(root, ".agent-atelier/.pending-tx.json")

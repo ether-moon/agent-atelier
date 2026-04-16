@@ -49,7 +49,7 @@ For each WI, determine its recoverable state:
 
 ### Step 3b: Candidate–WI Consistency Check
 
-If `active_candidate` is non-null, verify the referenced WI is actually in `candidate_validating` status. If the WI has already been reset to `ready` (e.g., crash between `validate record` and `candidate clear`), run `candidate clear --reason crash-recovery` to reconcile loop-state.
+If `active_candidate_set` is non-null, verify ALL referenced WIs (from `work_item_ids`) are in `candidate_validating` status. If any WI has been reset to `ready` (e.g., crash between `validate record` and the atomic clear), run `candidate clear --reason demoted` to reconcile loop-state. With the v0.2 atomic validate-clear, this scenario should be rare — `validate record` now includes `active_candidate_set → null` in the same transaction on failure.
 
 ### Step 4: Restore Gate Awareness
 
@@ -78,9 +78,9 @@ During that startup resume sweep:
 
 - any WI still in `implementing` is treated as stranded from the previous runtime and requeued immediately through State Manager
 - `ready` WIs return to the normal Builder dispatch path
-- `active_candidate` / `candidate_validating` work resumes with a fresh or reachable VRM as appropriate
+- `active_candidate_set` validation work resumes with a fresh or reachable VRM as appropriate
 - `reviewing` WIs resume from persisted review artifacts with fresh or reachable reviewers as appropriate
-- if CI validation was already in progress, the Orchestrator re-creates the ci-status monitor if needed
+- if CI validation was already in progress when the session crashed, the Orchestrator re-creates the ci-status monitor for the active candidate set if needed
 
 Previous session's monitors and cron jobs are gone — they were session-scoped and died with the crashed session. `/agent-atelier:run` is the only component that should recreate them.
 

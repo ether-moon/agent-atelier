@@ -71,16 +71,14 @@ Claims a work item for implementation, establishing a lease.
 
 Extends the lease on a work item the executor is actively working on. Heartbeats prove the executor is alive. Without them, the watchdog will eventually reclaim the item.
 
-1. Read the store.
-2. Find the work item. Verify:
-   - Status is `implementing`
-   - `owner_session_id` matches the caller
-   - Lease has not already expired
-3. Update:
-   - `last_heartbeat_at` → now
-   - `lease_expires_at` → now + lease duration
-   - `revision` → increment by 1
-4. Bump store revision and commit via state-commit.
+**This subcommand uses verb mode** — it calls state-commit directly without SM roundtrip, bypassing the control-plane path for this data-plane-only operation.
+
+1. Verify the WI exists and is in `implementing` status with a matching `owner_session_id`.
+2. Pipe a verb to state-commit:
+   ```bash
+   echo '{"verb":"heartbeat","target":"<WI-ID>","fields":{"last_heartbeat_at":"<now>","lease_expires_at":"<now+lease>"}}' | <plugin-root>/scripts/state-commit --root <repo-root>
+   ```
+3. Check the result. The verb mode handles lock, revision, and WAL atomically.
 
 ### `requeue <WI-ID>`
 
@@ -106,14 +104,14 @@ Returns a work item to the queue when the executor cannot continue. This might h
 
 ### `complete <WI-ID>`
 
-Marks a work item as done. This is a high-bar operation — it requires evidence that the work actually passed validation.
+Marks a work item as done. This is a high-bar operation — it requires evidence that the work actually passed validation. When the last WI in the active candidate set completes, the set is atomically cleared in the same transaction.
 
-1. Read the store.
+1. Read both `.agent-atelier/work-items.json` and `.agent-atelier/loop-state.json`. Note both revisions.
 2. Find the work item. Verify status is `reviewing` or `candidate_validating`.
 3. **Verify evidence:**
    - Read the validation manifest file at the provided path
    - Manifest `status` must be `passed`
-   - If manifest has a `work_item_id`, it must match `<WI-ID>`
+   - If manifest has `work_item_ids`, `<WI-ID>` must be in the array
    - All `--evidence-ref` paths must exist on disk
    - At least one `--verify-check` must be provided
 4. Build the completion record:
@@ -126,13 +124,16 @@ Marks a work item as done. This is a high-bar operation — it requires evidence
      "verify_checks": ["<check names>"]
    }
    ```
-5. Update:
+5. Update work-items.json:
    - `status` → `done`
    - Clear lease fields
    - `completion` → the completion record above
    - `revision` → increment by 1
-6. Bump store revision and write.
-7. **Sync native task.** Look up the native task for this WI (see Native Task Lookup below). If found, call `TaskUpdate` with `status: "completed"`.
+6. **Auto-clear candidate set:** Check if `active_candidate_set` contains this WI. If so, check all other WIs in `active_candidate_set.work_item_ids`:
+   - If **all** WIs (including this one after update) are now `done` → include `active_candidate_set → null` in the same transaction (commit both loop-state.json and work-items.json).
+   - If some WIs are not yet done → commit work-items.json only (set stays active for remaining WIs).
+7. Bump store revision(s) and commit.
+8. **Sync native task.** Look up the native task for this WI (see Native Task Lookup below). If found, call `TaskUpdate` with `status: "completed"`.
 
 **Arguments:**
 - `--validation-manifest <path>` — required

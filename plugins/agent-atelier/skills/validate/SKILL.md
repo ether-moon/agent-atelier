@@ -17,9 +17,9 @@ Validation runs produce evidence — test results, screenshots, check outcomes. 
 ## Prerequisites
 
 - Orchestration must be initialized
-- Work item must be in `candidate_validating` status
-- Work item must be the current `active_candidate` in loop-state
-- Candidate branch and commit in the manifest must match the WI's promotion metadata
+- All work items must be in `candidate_validating` status
+- All work items must be in the current `active_candidate_set` in loop-state
+- Candidate branch and commit in the manifest must match the active set's branch/commit
 
 ## Allowed Tools
 
@@ -47,7 +47,8 @@ Registers a validation run manifest and updates the work item status based on th
 
 1. **Parse the validation payload.** Required fields:
    - `id` — run identifier (e.g., `RUN-2026-04-08-01`). Generate from date if not provided.
-   - `work_item_id` — required
+   - `candidate_set_id` — required (must match `active_candidate_set.id`)
+   - `work_item_ids` — required array of WI IDs (must match `active_candidate_set.work_item_ids`)
    - `candidate_branch` — required
    - `candidate_commit` — required
    - `started_at` — required (UTC ISO-8601)
@@ -59,11 +60,12 @@ Registers a validation run manifest and updates the work item status based on th
 2. **Read state.** Read `.agent-atelier/work-items.json` and `.agent-atelier/loop-state.json`. Note both revisions.
 
 3. **Validate preconditions.**
-   - WI exists
-   - WI status is `candidate_validating`
-   - WI is the current `active_candidate` in loop-state (match by `work_item_id`)
-   - `candidate_branch` in the manifest matches `promotion.candidate_branch` on the WI
-   - `candidate_commit` in the manifest matches `promotion.candidate_commit` on the WI
+   - `active_candidate_set` is not null
+   - `candidate_set_id` matches `active_candidate_set.id`
+   - `work_item_ids` matches `active_candidate_set.work_item_ids` (same set)
+   - All WIs exist and have status `candidate_validating`
+   - `candidate_branch` matches `active_candidate_set.branch`
+   - `candidate_commit` matches `active_candidate_set.commit`
 
 4. **Verify evidence.** If `evidence_refs` are provided, verify each path resolves to an existing file on disk. Warn (but do not block) if evidence refs are empty — the evidence may be generated separately.
 
@@ -72,8 +74,9 @@ Registers a validation run manifest and updates the work item status based on th
    ```json
    {
      "id": "RUN-2026-04-08-01",
-     "work_item_id": "WI-014",
-     "candidate_branch": "candidate/WI-014",
+     "candidate_set_id": "CS-001",
+     "work_item_ids": ["WI-018", "WI-019", "WI-020", "WI-021"],
+     "candidate_branch": "feat/phase-2",
      "candidate_commit": "abc1234",
      "started_at": "2026-04-08T14:10:00Z",
      "finished_at": "2026-04-08T14:17:00Z",
@@ -90,23 +93,24 @@ Registers a validation run manifest and updates the work item status based on th
 6. **Phase 2: Update orchestration state.** The update depends on the manifest `status`:
 
    **If `passed`:**
-   - **work-items.json:** WI `status` → `reviewing`. Bump item `revision`.
-   - **loop-state.json:** No change — the candidate stays active for the review and completion phase.
+   - **work-items.json:** All WIs `status` → `reviewing`. Bump each item `revision`.
+   - **loop-state.json:** No change — the candidate set stays active for the review and completion phase.
    - Commit work-items.json only.
 
-   **If `failed`:**
-   - **work-items.json:**
+   **If `failed`:** (atomic demotion + candidate set clear — fate-sharing)
+   - **work-items.json** (for each WI in the set):
      - `status` → `ready`
      - `promotion.candidate_branch` → null
      - `promotion.candidate_commit` → null
      - `promotion.status` → `demoted`
      - Bump item `revision`
-   - **loop-state.json:** No change — active_candidate cleanup is **not** this skill's responsibility. The Orchestrator must then call `candidate clear --reason demoted` to release the candidate slot.
-   - Commit work-items.json only.
+   - **loop-state.json:** `active_candidate_set` → null. Bump `revision`, set `updated_at`.
+   - Commit **both** files in one transaction. The candidate set is atomically cleared alongside the WI demotion — no separate `candidate clear` call is needed.
+   - **Sync native tasks.** For each WI, look up the native task and call `TaskUpdate` with `status: "pending"`.
 
    **If `environment_error`:**
-   - **work-items.json:** No status change — WI stays `candidate_validating`. The environment issue is not the code's fault. Bump item `revision` only if adding a note.
-   - **loop-state.json:** No change — the candidate stays active.
+   - **work-items.json:** No status change — WIs stay `candidate_validating`. The environment issue is not the code's fault. Bump item `revision` only if adding a note.
+   - **loop-state.json:** No change — the candidate set stays active.
    - The orchestrator decides next steps (retry validation, escalate, or open a gate).
    - If no state changes are needed, skip the commit and report the environment error to the caller.
 
@@ -158,7 +162,7 @@ Returns JSON to stdout:
 }
 ```
 
-When validation fails, `artifacts` includes only `.agent-atelier/work-items.json` (loop-state.json is not modified — the Orchestrator calls `candidate clear` separately). For `environment_error` with no state changes: `"changed": false`. Diagnostic messages go to stderr.
+When validation fails, `artifacts` includes both `.agent-atelier/work-items.json` and `.agent-atelier/loop-state.json` (atomic demotion + set clear). For `environment_error` with no state changes: `"changed": false`. Diagnostic messages go to stderr.
 
 ## Idempotency
 
@@ -172,9 +176,10 @@ When validation fails, `artifacts` includes only `.agent-atelier/work-items.json
 | Condition | Exit Code | Action |
 |-----------|-----------|--------|
 | WI not found | `3` | Report missing WI, list available IDs |
-| WI not in `candidate_validating` | `2` | Report current status, explain expected status |
-| WI is not the active_candidate | `2` | Report which WI is active, suggest waiting |
-| Branch/commit mismatch | `2` | Report the mismatch between manifest and WI promotion metadata |
+| Any WI not in `candidate_validating` | `2` | Report current status, explain expected status |
+| WIs not in `active_candidate_set` | `2` | Report which set is active, suggest waiting |
+| `candidate_set_id` mismatch | `2` | Report the mismatch between manifest and active set |
+| Branch/commit mismatch | `2` | Report the mismatch between manifest and active set |
 | Evidence file missing | `1` | List which evidence_refs were not found on disk |
 | Manifest already exists for this run ID | `0` | Report existing manifest path, suggest checking for duplicate runs |
 | Invalid manifest status | `1` | Report the invalid value, list valid statuses (`passed`, `failed`, `environment_error`) |

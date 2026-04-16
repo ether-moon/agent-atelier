@@ -44,7 +44,7 @@ with open(loop_file) as f:
 items = store.get("items", [])
 mode = loop.get("mode", "")
 candidate_queue = loop.get("candidate_queue", [])
-active_candidate = loop.get("active_candidate")
+active_candidate_set = loop.get("active_candidate_set")
 
 # --- Role resolution ---
 # Primary: read agentType from team config via loop-state team_name
@@ -88,11 +88,11 @@ if role in ("builder",):
     pass
 
 elif role in ("vrm", "validator"):
-    if active_candidate and mode in ("VALIDATE", "IMPLEMENT"):
-        wi_id = active_candidate.get("work_item_id", str(active_candidate))
-        print(f"Active candidate exists: {wi_id}. "
+    if active_candidate_set and mode in ("VALIDATE", "IMPLEMENT"):
+        wi_ids = active_candidate_set.get("work_item_ids", [])
+        print(f"Active candidate set exists: {', '.join(wi_ids)}. "
               f"Begin validation using the evidence from build-vrm-prompt.")
-    # No active_candidate → VRM cannot act. Allow idle and let Orchestrator
+    # No active_candidate_set → VRM cannot act. Allow idle and let Orchestrator
     # activate the next candidate + message VRM when ready. Sending repeated
     # "ask the Orchestrator" messages creates a token-burning idle loop.
 
