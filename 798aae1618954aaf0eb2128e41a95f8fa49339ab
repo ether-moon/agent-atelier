@@ -1,0 +1,34 @@
+Decisions Made
+- Split cold resume from the in-session 15-minute recovery pulse.
+- Made `/agent-atelier:run` the sole owner of monitor and cron restoration after restart.
+- Added a startup resume sweep to reclaim stranded `implementing` work immediately.
+- Added recovery contract regression tests and wired them into `tests/all.sh`.
+
+Problems Encountered
+- Recovery docs previously allowed valid leases from a crashed runtime to look resumable.
+- Monitor/cron recreation responsibilities were duplicated between `run` and the recovery protocol.
+- Existing tests covered scripts and state mutation, but not cross-document recovery contract drift.
+
+Constraints Identified
+- Recovery remains file-driven; no new durable pause schema was introduced.
+- `watchdog tick` must stay mechanical and not infer teammate liveness from lease state alone.
+- Session-scoped monitors and cron jobs cannot survive restart and must be recreated by the new runtime.
+- `knowledge-gate` was unavailable in this workspace shell, so no vault entry could be queried.
+
+Open Questions
+- Whether to add an end-to-end runtime harness that simulates cron prompts and teammate loss rather than only document-contract checks.
+
+Context
+- Updated recovery design docs, orchestrator prompt, run/watchdog skills, and system design references to make cold-resume reclaim behavior explicit.
+- Added `docs/design/session-limit-retry.md` as the focused design note for the session-limit retry model.
+- Added `tests/recovery_contracts.sh` to lock the new recovery invariants across the relevant docs.
+- Verified with `bash tests/all.sh` after the test additions.
+
+Recorded Decisions
+- Cold resume never resumes a crashed-runtime owner directly; startup recovery requeues stranded `implementing` WIs immediately.
+- The 15-minute watchdog lane is a two-step recovery path: mechanical tick first, Orchestrator resume sweep second.
+- `/agent-atelier:run` recreates both the `*/2` monitor poll cron and the `*/15` watchdog recovery cron.
+- The regression test suite now treats these recovery statements as normative contract checks.
+
+Vault Entries Referenced
+- None. `knowledge-gate` was not available in the shell environment during this session.
