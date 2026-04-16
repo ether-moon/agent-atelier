@@ -1,0 +1,24 @@
+Decisions Made
+- Landed the remaining `state-commit` helper cleanups as a separate refactor commit before opening the PR.
+- Kept the branch history additive instead of rewriting the previous fix commits.
+
+Problems Encountered
+- A final unstaged diff remained in `state-commit` after the earlier fix commit, covering helper reuse in dependency resolution and WAL replay.
+
+Constraints Identified
+- PR branch needed a clean worktree before creation.
+- History had already been pushed once, so additive cleanup remained the safest path.
+
+Open Questions
+- None.
+
+Context
+- This commit finalized the `state-commit` work after rebasing and contract-alignment changes.
+- The full test suite was planned to be re-run on the cleaned branch before PR creation.
+
+Recorded Decisions
+- Keep helper-based rejection and work-item-write lookup usage consistent across `state-commit` internals.
+- Open the PR only after the branch is clean and tests pass.
+
+Vault Entries Referenced
+- None.
