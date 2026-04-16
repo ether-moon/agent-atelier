@@ -1,0 +1,23 @@
+## Decisions Made
+- Replace hardcoded `"agent-atelier-dev"` team name with derivation from git root: `atelier-<basename>-<hash>` — allows multiple projects to run agent-atelier concurrently without collision
+- Add stale team cleanup logic before team creation — force-removes lingering team/tasks directories from crashed sessions
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- Team name derivation limited to lowercase alphanumerics, underscore, hyphen via sanitization rules
+- Base name truncated to 20 chars to fit Notion team name length constraints
+- SHA256 hash truncated to first 4 chars for readable uniqueness
+
+## Open Questions
+- None
+
+## Context
+Task 1 of session-scoped-teams: updated `plugins/agent-atelier/skills/run/SKILL.md` Phase 2 (team creation) to derive team names dynamically instead of hardcoding. This prevents collision when multiple projects use agent-atelier. Verified with grep that old hardcoded name is fully removed.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
