@@ -48,9 +48,13 @@ Create one flat team and spawn teammates. Full details in `reference/team-lifecy
 
 After the team is running:
 1. Start background monitors via `/agent-atelier:monitors spawn`
-2. Create a monitor poll cron job (`*/2 * * * *`)
-3. Create a watchdog recovery cron job (`*/15 * * * *`)
+2. Create monitor poll job. Schedule a `*/2 * * * *` cron to invoke `/agent-atelier:monitors check`.
+3. Create watchdog recovery job. Schedule a `*/15 * * * *` cron to invoke `/agent-atelier:watchdog tick` + resume sweep.
 4. Run the **startup resume sweep** -- reclaim stranded work, resume recoverable state, then present the startup dashboard
+
+### Startup Resume Sweep (Run Once After Team Spawn)
+
+Scan all WIs with status `implementing` whose owner is unreachable. For each, requeue with reason `cold-resume: owner session unavailable`. This reclaims stranded work from a previous crashed runtime without waiting for a watchdog tick. Present the startup dashboard only after the sweep completes so the user sees recovered state.
 
 ## Phase 3: State Machine Loop
 
@@ -85,7 +89,7 @@ Two concurrent monitoring mechanisms run alongside the state machine loop:
 
 **Watchdog recovery (every ~15 min):** Invokes `/agent-atelier:watchdog tick` for mechanical recovery (stale leases, expired candidates, budget enforcement), then runs an Orchestrator resume sweep (respawn missing teammates, dispatch Builders, requeue unreachable owners). Silent when nothing to recover.
 
-**CI monitor (on-demand):** Spawned when entering VALIDATE with a CI run. Self-terminates on terminal CI state. Events picked up by monitor polling.
+**CI monitor (on-demand):** Spawned when entering VALIDATE with a CI run. Self-terminates on terminal CI state. Events picked up by monitor polling. On `ci_status` (success) → evaluate fast-track, then transition to IMPLEMENT or REVIEW_SYNTHESIS.
 
 ## Human Gate Protocol
 

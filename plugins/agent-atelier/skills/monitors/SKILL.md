@@ -197,4 +197,5 @@ Reports current health of all monitors.
 - All state mutations triggered by events route through the Orchestrator to the appropriate skill
 - Monitor task IDs are **session-scoped** — they do not survive session restarts
 - ci-status is the only self-terminating monitor (exits 0 on CI completion)
+- On `ci_status` (success) → evaluate fast-track, then transition to IMPLEMENT or REVIEW_SYNTHESIS
 - The CronCreate poll job that invokes `check` is created by the `/run` skill, not by this skill
