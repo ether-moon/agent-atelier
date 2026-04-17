@@ -1,0 +1,21 @@
+## Decisions Made
+- Add missing test-asserted strings directly to skill docs rather than relaxing tests: The tests encode contracts from the recovery protocol and system design, so the skills must match.
+- Place the Startup Resume Sweep as a subsection under Phase 2 (Spawn Team): It logically belongs after team spawn steps since it runs once after the team is up.
+
+## Problems Encountered
+- CI failing with 5 test failures across orchestration and recovery contract suites: Root-caused to the run skill rewrite dropping exact strings the tests assert (heading format, cron creation sentences, cold-resume reason, fast-track line). Resolved by restoring the expected strings in contextually appropriate locations.
+
+## Constraints Identified
+- Recovery contract tests use exact string matching (assert_contains): Any rewording of skill docs must preserve the exact phrases these tests check, or the tests must be updated in lockstep.
+
+## Open Questions
+None
+
+## Context
+Scanned PR #12 for blockers and found no merge conflicts, no review comments, but 5 CI test failures. The run skill SKILL.md was missing recovery contract strings (Startup Resume Sweep heading, cold-resume reason, cron job sentences) and both run and monitors SKILL.md were missing the fast-track ci_status transition line. Fixed both files and verified all 58 tests pass locally.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
