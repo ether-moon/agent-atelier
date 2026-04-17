@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.4] - 2026-04-17
+
+### Improved
+
+- **skills**: refine all 10 skills via creating-skills methodology for clarity and consistency (#12)
+- **orchestration**: align runtime with orchestration model v0.2 (#11)
+- **recovery**: align recovery contracts and add regression tests (#10)
+- **subagents**: add OUTPUT DISCIPLINE to role prompts for token efficiency (#9)
+- **teams**: session-scoped team names for cross-project isolation (#8)
+
+### Fixed
+
+- **TeammateIdle**: prevent phantom claims and idle loops (#6)
+
 ## [0.1.3] - 2026-04-14
 
 ### Improved
