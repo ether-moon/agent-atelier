@@ -140,7 +140,7 @@ Diagnostic messages go to stderr.
 
 When presenting to a human user, render a readable summary:
 
-```
+```text
 Watchdog tick at 2026-04-08T12:00:00Z
 
 Recovered:

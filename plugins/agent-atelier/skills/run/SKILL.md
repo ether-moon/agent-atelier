@@ -36,7 +36,7 @@ On a clean start, the loop begins at DISCOVER and drives through to DONE. On col
 ## Phase 1: Pre-Flight Check
 
 1. **Read state.** Load `.agent-atelier/loop-state.json`, `.agent-atelier/work-items.json`, `.agent-atelier/watchdog-jobs.json`.
-2. **WAL recovery.** If `.agent-atelier/.pending-tx.json` exists, replay it first (see `references/recovery-protocol.md`).
+2. **WAL recovery.** If `.agent-atelier/.pending-tx.json` exists, replay it first (see `../../references/recovery-protocol.md`).
 3. **Check for stale work.** Run a watchdog tick to recover stale leases or candidates from a previous session. Still-valid `implementing` leases from a crashed runtime are reclaimed later by the startup resume sweep.
 4. **Defer dashboard.** Do not present the startup dashboard if recovery is in progress; show it after the startup resume sweep so the user sees recovered state.
 
@@ -139,12 +139,12 @@ Returns JSON to stdout on completion:
 | Monitor crashes | Polling detects dead monitor, Orchestrator re-spawns |
 | Monitor crashes 3+ times | Escalate to user instead of retrying |
 | Rate limit stalls team | Next watchdog pulse re-runs recovery and resume sweep |
-| Lead dies before cron exists | Cold resume via `references/recovery-protocol.md`, then `/run` recreates infrastructure |
+| Lead dies before cron exists | Cold resume via `../../references/recovery-protocol.md`, then `/run` recreates infrastructure |
 
 ## Constraints
 
 - Orchestrator NEVER implements code directly except as last resort (all executors idle + single trivial fix)
 - All orchestration writes route through State Manager teammate
 - Information barrier between implementation and validation enforced at every phase boundary
-- Success metrics inform routing but never become executable acceptance checks (see `references/success-metrics-routing.md`)
-- Recovery from any crash follows `references/recovery-protocol.md`
+- Success metrics inform routing but never become executable acceptance checks (see `../../references/success-metrics-routing.md`)
+- Recovery from any crash follows `../../references/recovery-protocol.md`

@@ -78,27 +78,27 @@ Clears the active set. `--reason completed` verifies all WIs are `done` and clea
 ## Examples
 
 **Enqueue a single WI after implementation:**
-```
+```bash
 /candidate enqueue WI-014 --branch candidate/WI-014 --commit abc1234
 ```
 
 **Enqueue a batch of WIs from the same branch:**
-```
+```bash
 /candidate enqueue WI-018,WI-019,WI-020 --branch feat/phase-2 --commit def5678
 ```
 
 **Activate the next queued set for validation:**
-```
+```bash
 /candidate activate
 ```
 
 **Clear after all WIs pass validation:**
-```
+```bash
 /candidate clear --reason completed
 ```
 
 **Clear after validation failure (demote all WIs):**
-```
+```bash
 /candidate clear --reason demoted
 ```
 

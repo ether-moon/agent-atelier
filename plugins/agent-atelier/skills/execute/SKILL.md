@@ -27,7 +27,7 @@ argument-hint: "claim <id> | heartbeat <id> | requeue <id> | complete <id> | att
 
 ## Write Protocol
 
-All mutations go through the `state-commit` script — the sole writer for `.agent-atelier/**`. Pattern: read current store (note its `revision`), validate preconditions, pipe transaction JSON to `state-commit`, check result (retry on `stale_revision`). Every transaction includes `expected_revision` set to the store's current revision at read time.
+All mutations go through the `state-commit` script — the sole writer for `.agent-atelier/**`. Pattern: read current store (note its `revision`), validate preconditions, pipe transaction JSON to `state-commit`, check result (retry on `stale_revision`). Every transaction includes a revision field (`expected_revision` or `based_on_revision` for verb commands like `heartbeat`) set to the store's current revision at read time.
 
 ```bash
 echo '<transaction-json>' | <plugin-root>/scripts/state-commit --root <repo-root>
@@ -113,7 +113,7 @@ All timestamps are UTC ISO-8601 with `Z` suffix: `2026-04-08T12:00:00Z`. Lease e
 
 ## Input Conventions
 
-All subcommands accept payload via `--json '<inline-json>'` or `--input <path>`. Required for all mutating operations: `--request-id <id>`.
+Mutating subcommands (`claim`, `requeue`, `complete`, `attempt`) accept payload via `--json '<inline-json>'` or `--input <path>`. Read-only subcommands do not require payload. Required for all mutating operations: `--request-id <id>`. The `heartbeat` verb command uses only positional arguments and `--lease-duration`.
 
 Revision handling:
 - Single-file commands (`claim`, `requeue`, `attempt`) use the current `work-items.json` revision

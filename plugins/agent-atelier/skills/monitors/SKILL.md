@@ -171,12 +171,18 @@ Reports current health of all monitors.
 | `1` | Usage error (missing arguments, invalid subcommand) |
 | `4` | Runtime failure (unable to spawn, TaskOutput error) |
 
-## Input / Output / Idempotency
+## Input Conventions
 
-- All subcommands return JSON to stdout. Diagnostic messages go to stderr.
 - `check` accepts task IDs as a JSON object argument.
 - `spawn-ci` requires either `--run-id` or `--pr` (mutually exclusive).
 - `stop` accepts `all` or a monitor name.
+
+## Output Contract
+
+- All subcommands return JSON to stdout. Diagnostic messages go to stderr.
+
+## Idempotency
+
 - `spawn` skips already-running monitors (same session).
 - `stop` on an already-stopped monitor returns `"changed": false`.
 - `check` is inherently idempotent (read-only).

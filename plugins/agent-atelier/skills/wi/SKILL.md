@@ -34,7 +34,7 @@ For `upsert`, the caller provides either:
 
 ## Examples
 
-```
+```bash
 /agent-atelier:wi list
 /agent-atelier:wi show WI-014
 /agent-atelier:wi upsert {"id": "WI-016", "title": "Add retry logic", "status": "ready", "depends_on": ["WI-014"], "complexity": "simple"}

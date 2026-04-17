@@ -196,4 +196,4 @@ Artifacts vary by status: `passed` includes `work-items.json`; `failed` includes
 - **Manifest is source of truth.** WI status transitions derive from manifest status, not from any other signal.
 - **Evidence refs must resolve.** The skill verifies each path exists before committing.
 - **Terminal statuses only:** `passed`, `failed`, `environment_error`. Do not use `running` — record only after the run finishes.
-- Read `references/wi-schema.md` for normalization rules on all work item writes.
+- Read `../../references/wi-schema.md` for normalization rules on all work item writes.

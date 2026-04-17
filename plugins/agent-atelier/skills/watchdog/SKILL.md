@@ -32,6 +32,16 @@ The watchdog performs ONLY mechanical, reversible recovery. It never edits produ
 
 The watchdog does not assess whether a lease holder is still reachable. If a WI remains `implementing` with an unexpired lease, the watchdog leaves it alone; the Orchestrator's recovery pulse handles reachability.
 
+## Write Protocol
+
+All state mutations go through `state-commit`. The watchdog reads all three state files, computes recovery actions, and commits them in a single transaction with `expected_revision` per file. On `stale_revision`, re-read state and retry.
+
+## Subcommands
+
+### `tick`
+
+The only subcommand. Runs the full health check and recovery sweep described in Execution Steps below.
+
 ## Execution Steps
 
 Each step is summarized below. See `reference/execution-details.md` for field-level specifics.
@@ -52,7 +62,7 @@ After the report, the Orchestrator may respawn teammates, re-message owners, req
 ## Examples
 
 **Invocation (typical):**
-```
+```bash
 /agent-atelier:watchdog tick
 ```
 

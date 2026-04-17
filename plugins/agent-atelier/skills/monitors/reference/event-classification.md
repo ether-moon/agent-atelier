@@ -29,14 +29,17 @@ This protocol defines what the Orchestrator does when the CronCreate polling pro
 **IMMEDIATE events -- act within this polling cycle:**
 
 - `heartbeat_warning` (expired) -- trigger `/agent-atelier:watchdog tick`
-- `heartbeat_warning` (warning) -- message Builder via `SendMessage` to send `execute heartbeat`
+- `heartbeat_warning` (warning) -- message Builder via `SendMessage` to send `execute heartbeat` (non-blocking; log if Builder is unresponsive)
 - `gate_resolved` -- re-read gate state, resume blocked WIs
 - `gate_opened` -- present HDR to user immediately
 - `ci_status` (success) -- evaluate fast-track, then transition to IMPLEMENT or REVIEW_SYNTHESIS
 - `ci_status` (failure/cancelled) -- record validation failure, candidate demotion
 - `branch_divergence` (critical) -- inform user, strongly recommend rebase
 
-**WARNING events:** Log for next human-visible status report.
+**WARNING events -- act on a best-effort basis this cycle:**
+
+- `heartbeat_warning` (warning) -- nudge Builder; if unresponsive, log for next status report
+- `branch_divergence` (warning) -- log for next human-visible status report
 
 **INFO events:** Update situational awareness, no action required.
 
