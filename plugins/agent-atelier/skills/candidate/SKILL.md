@@ -1,50 +1,46 @@
 ---
 name: candidate
-description: "Candidate lifecycle — enqueue work items as a candidate set for validation, activate the next queued set into the exclusive validation slot, or clear the active set after completion or demotion. Supports single and batch candidates. Use when a builder finishes implementation, when the orchestrator needs to start validation, or when validation is done. Triggers on 'candidate', 'enqueue candidate', 'activate candidate', 'clear candidate', 'promote to candidate', 'candidate queue', 'next candidate', or 'demote candidate'."
-argument-hint: "enqueue <WI-ID>[,WI-ID,...] | activate | clear [--reason completed|demoted]"
+description: "Candidate pipeline lifecycle — enqueue work items as a candidate set for validation, activate the next queued set into the exclusive validation slot, or clear the active set after completion or demotion. Supports single and batch candidates with fate-sharing semantics. Use when a builder finishes implementation, when the orchestrator needs to start validation, or when validation passes or fails. Triggers on 'candidate', 'enqueue candidate', 'activate candidate', 'clear candidate', 'promote to candidate', 'candidate queue', 'next candidate', 'demote candidate', 'candidate ready', 'submit for validation', or 'validation slot'."
+argument-hint: "enqueue <WI-ID>[,WI-ID,...] --branch <name> --commit <sha> | activate | clear [--reason completed|demoted]"
 ---
 
 # Candidate — Candidate Pipeline Lifecycle
 
-Candidates are the bridge between implementation and validation. When a builder finishes work items, the results are enqueued as a **candidate set** — a group of one or more WIs sharing a branch and commit. The orchestrator then activates the next set into the exclusive validation slot, where exactly one set is validated at a time. After validation, the set is cleared — either because all WIs passed and are done, or because validation failed and all WIs return to rework (fate-sharing).
+Candidates bridge implementation and validation. When a builder finishes work items, they are enqueued as a **candidate set** — one or more WIs sharing a branch and commit. The orchestrator activates the next set into the exclusive validation slot (one at a time). After validation, the set is cleared as completed or demoted (fate-sharing: all WIs succeed or all return to rework).
 
 ## Candidate Set Schema
-
-A candidate set is a first-class object:
 
 ```json
 {
   "id": "CS-001",
-  "work_item_ids": ["WI-018", "WI-019", "WI-020", "WI-021"],
+  "work_item_ids": ["WI-018", "WI-019"],
   "branch": "feat/phase-2",
   "commit": "abc1234",
   "type": "batch",
-  "activated_at": "2026-04-08T14:10:00Z"
+  "activated_at": null
 }
 ```
 
-- `id`: `CS-NNN` format, auto-generated on enqueue (next available number in queue + active set)
-- `work_item_ids`: always an array, even for single WIs (`["WI-014"]`)
+- `id`: `CS-NNN`, auto-generated on enqueue
+- `work_item_ids`: always an array, even for single WIs
 - `type`: `"single"` (1 WI) or `"batch"` (2+ WIs)
-- `activated_at`: set when the set moves from queue to active slot; null while queued
+- `activated_at`: set on activation; null while queued
 
-Loop-state stores:
-- `active_candidate_set`: the set currently under validation (null when empty)
-- `candidate_queue`: array of candidate sets awaiting activation (FIFO)
+Loop-state stores `active_candidate_set` (one set or null) and `candidate_queue` (FIFO array).
 
 ## When This Skill Runs
 
 - Builder finishes implementation and has a candidate branch/commit ready (enqueue)
-- Orchestrator is ready to start validation on the next queued candidate set (activate)
-- All WIs in the set pass validation and are complete (clear with completed)
-- Validation fails — all WIs in the set return to rework (clear with demoted)
+- Orchestrator is ready to start validation on the next queued set (activate)
+- All WIs in the set pass validation and are complete (clear --reason completed)
+- Validation fails and all WIs return to rework (clear --reason demoted)
 
 ## Prerequisites
 
 - Orchestration must be initialized
-- For `enqueue`: all specified work items must be in `implementing` status
-- For `activate`: `active_candidate_set` must be null and `candidate_queue` must be non-empty
-- For `clear`: `active_candidate_set` must be non-null
+- `enqueue`: all specified WIs must be in `implementing` status
+- `activate`: `active_candidate_set` must be null; `candidate_queue` must be non-empty
+- `clear`: `active_candidate_set` must be non-null
 
 ## Allowed Tools
 
@@ -52,114 +48,59 @@ Loop-state stores:
 
 ## Write Protocol
 
-Candidate operations touch multiple files (`loop-state.json` and `work-items.json`). All writes go through a single `state-commit` transaction to prevent partial updates. If the session stops between read and commit, no files change. If it stops after commit, all files are consistent.
+All writes go through a single `state-commit` transaction. Every subcommand follows:
+
+1. **Read** both `loop-state.json` and `work-items.json`. Note both revisions.
+2. **Validate** preconditions and prepare updated content.
+3. **Commit** by piping a transaction to `state-commit`.
+4. **Check** the result. If `stale_revision`, re-read and retry.
 
 ```bash
 echo '<transaction-json>' | <plugin-root>/scripts/state-commit --root <repo-root>
 ```
 
-The transaction includes every file that needs to change, with `expected_revision` set for each JSON file's current revision. Every subcommand below follows the same pattern:
-
-1. **Read** both `.agent-atelier/loop-state.json` and `.agent-atelier/work-items.json`. Note both revisions.
-2. **Validate** preconditions and prepare the updated content.
-3. **Commit** by piping a transaction to `state-commit`.
-4. **Check** the result. If `stale_revision`, re-read and retry.
-
 ## Subcommands
 
-### `enqueue <WI-ID>[,WI-ID,...]`
+For detailed step-by-step procedures, see `reference/subcommands.md`.
 
-Enqueues one or more work items as a candidate set for validation. For batch enqueue, provide comma-separated WI IDs. All WIs in the set share the same branch and commit.
+### `enqueue <WI-ID>[,WI-ID,...] --branch <name> --commit <sha>`
 
-1. Read both `.agent-atelier/loop-state.json` and `.agent-atelier/work-items.json`. Note both revisions.
-2. Parse the WI IDs (split by comma if batch). Find each work item. Verify:
-   - **All** WIs have status `implementing`. If any WI is not `implementing`, reject the entire enqueue.
-   - `--branch` and `--commit` are provided
-   - None of the WIs appear in any existing `candidate_queue` entry (check by `work_item_ids`)
-   - None of the WIs are in the current `active_candidate_set`
-3. Generate the next `CS-NNN` ID by scanning existing IDs in `active_candidate_set` and `candidate_queue`.
-4. Prepare all changes in memory:
-   - **work-items.json** (for each WI in the set):
-     - `status` → `candidate_queued`
-     - `promotion.candidate_branch` → the provided branch
-     - `promotion.candidate_commit` → the provided commit
-     - `promotion.status` → `queued`
-     - Clear lease fields: `owner_session_id` → null, `last_heartbeat_at` → null, `lease_expires_at` → null
-     - Bump item `revision`
-   - **loop-state.json:**
-     - Append candidate set to `candidate_queue`:
-       ```json
-       {
-         "id": "CS-003",
-         "work_item_ids": ["WI-018", "WI-019"],
-         "branch": "feat/phase-2",
-         "commit": "abc1234",
-         "type": "batch",
-         "activated_at": null
-       }
-       ```
-     - Bump `revision`, set `updated_at`
-5. Commit both files in one transaction.
-
-**Arguments:**
-- `<WI-ID>[,WI-ID,...]` — required (single ID or comma-separated for batch)
-- `--branch <name>` — required (e.g., `candidate/WI-014` or `feat/phase-2`)
-- `--commit <sha>` — required (e.g., `abc1234`)
+Enqueues WIs as a candidate set. Transitions each WI from `implementing` to `candidate_queued`, sets promotion metadata, clears lease fields, and appends the set to `candidate_queue`.
 
 ### `activate`
 
-Pops the first candidate set from the queue into the exclusive validation slot. Only one set can be active at a time.
-
-1. Read both `.agent-atelier/loop-state.json` and `.agent-atelier/work-items.json`. Note both revisions.
-2. Verify:
-   - `active_candidate_set` is null (the slot must be empty)
-   - `candidate_queue` is non-empty
-3. Pop the first entry from `candidate_queue` (FIFO order).
-4. Prepare all changes in memory:
-   - **loop-state.json:**
-     - `active_candidate_set` → the popped entry with `activated_at` set to now (UTC)
-     - Remove the entry from `candidate_queue`
-     - Bump `revision`, set `updated_at`
-   - **work-items.json** (for each WI in the set's `work_item_ids`):
-     - `status` → `candidate_validating`
-     - `promotion.status` → `validating`
-     - Bump item `revision`
-5. Commit both files in one transaction.
-
-**Arguments:** None — always activates the first entry in FIFO order.
+Pops the first set from `candidate_queue` into `active_candidate_set` (FIFO). Transitions each WI from `candidate_queued` to `candidate_validating`. No arguments.
 
 ### `clear [--reason completed|demoted]`
 
-Clears the active candidate set after validation completes or after demotion due to failure.
+Clears the active set. `--reason completed` verifies all WIs are `done` and clears the slot. `--reason demoted` (default) resets all WIs to `ready`, clears promotion metadata, and syncs native tasks back to `pending`.
 
-1. Read both `.agent-atelier/loop-state.json` and `.agent-atelier/work-items.json`. Note both revisions.
-2. Verify `active_candidate_set` is not null.
-3. Find all WIs referenced by `active_candidate_set.work_item_ids`.
-4. Based on `--reason`:
+## Examples
 
-   **`completed`** — All WIs have been marked `done` by `execute complete`. Only the loop-state slot needs clearing.
-   - Verify **all** WI statuses are `done`. If any WI is not `done`, reject.
-   - **loop-state.json:** `active_candidate_set` → null. Bump `revision`, set `updated_at`.
-   - Commit loop-state only.
+**Enqueue a single WI after implementation:**
+```bash
+/candidate enqueue WI-014 --branch candidate/WI-014 --commit abc1234
+```
 
-   **`demoted`** (default) — Validation failed. **All WIs in the set return to rework** (fate-sharing: all-or-nothing).
-   - **Idempotency guard:** If all WIs are already in `ready` status with promotion metadata fully cleared (`candidate_branch` / `candidate_commit` null and `promotion.status == "not_ready"`), skip the work-items.json write — only clear the loop-state slot.
-   - **If any WI still needs demotion** (status is not `ready` or promotion not yet cleared):
-     - **work-items.json** (for each WI in the set):
-       - `status` → `ready`
-       - `promotion.candidate_branch` → null
-       - `promotion.candidate_commit` → null
-       - `promotion.status` → `not_ready`
-       - Bump item `revision`
-     - **loop-state.json:** `active_candidate_set` → null. Bump `revision`, set `updated_at`.
-     - Commit both files in one transaction.
-     - **Sync native tasks.** For each WI, look up the native task (search `TaskList` for subject starting with the WI's ID prefix). If found, call `TaskUpdate` with `status: "pending"`.
-   - **If all WIs are already reset to `ready` with cleared promotion metadata:**
-     - **loop-state.json:** `active_candidate_set` → null. Bump `revision`, set `updated_at`.
-     - Commit loop-state only.
+**Enqueue a batch of WIs from the same branch:**
+```bash
+/candidate enqueue WI-018,WI-019,WI-020 --branch feat/phase-2 --commit def5678
+```
 
-**Arguments:**
-- `--reason <completed|demoted>` — optional, defaults to `demoted`
+**Activate the next queued set for validation:**
+```bash
+/candidate activate
+```
+
+**Clear after all WIs pass validation:**
+```bash
+/candidate clear --reason completed
+```
+
+**Clear after validation failure (demote all WIs):**
+```bash
+/candidate clear --reason demoted
+```
 
 ## Timestamps
 
@@ -171,23 +112,15 @@ All timestamps are UTC ISO-8601 with `Z` suffix: `2026-04-08T12:00:00Z`
 |------|---------|
 | `0` | Success |
 | `1` | Usage or validation error (missing required fields) |
-| `2` | Precondition failed (wrong status, slot occupied, queue empty) or stale revision |
+| `2` | Precondition failed (wrong status, slot occupied, queue empty, stale revision) |
 | `3` | Work item not found |
 | `4` | Runtime or environment failure |
 
 ## Input Conventions
 
-The `enqueue` subcommand accepts payload via:
-- `--json '<inline-json>'` — inline JSON string
-- `--input <path>` — path to a JSON file
-
-Required flags for all mutating operations:
-- `--request-id <id>` — unique request identifier for idempotency tracking
-
-Revision handling:
-- Candidate lifecycle commands are multi-file writes
-- Track the current revision of every file you mutate and use the matching `expected_revision` for each JSON artifact in the `state-commit` transaction
-- Do not reuse a single shared revision value for both `loop-state.json` and `work-items.json` unless they actually match on disk
+- `--json '<inline-json>'` or `--input <path>` for payload
+- `--request-id <id>` required on all mutating operations (idempotency tracking)
+- Track the current revision of every file you mutate; use matching `expected_revision` per artifact in the transaction (do not reuse a single value for both files)
 
 ## Output Contract
 
@@ -207,32 +140,32 @@ All subcommands return JSON to stdout:
 }
 ```
 
-The `clear --reason completed` and `clear --reason demoted` (when WIs already demoted by validate) variants may include only `loop-state.json` in artifacts. Diagnostic messages go to stderr.
+`clear --reason completed` and idempotent `clear --reason demoted` may include only `loop-state.json` in artifacts. Diagnostics go to stderr.
 
 ## Idempotency
 
 - Same `request_id` + same payload → return previous result with `"changed": false, "replayed": true`
 - Same `request_id` + different payload → reject with exit code `1`
-- Stale `based_on_revision` → reject with exit code `2`
+- Stale revision → reject with exit code `2`
 
 ## Error Handling
 
-| Condition | Exit Code | Action |
-|-----------|-----------|--------|
-| Any WI not found | `3` | Report missing WI IDs, list available IDs |
-| Any WI not in `implementing` for enqueue | `2` | Report which WIs have wrong status, explain expected status |
-| `active_candidate_set` already occupied (activate) | `2` | Report set ID and since when, suggest clearing first |
-| `candidate_queue` empty (activate) | `2` | Report empty queue, suggest enqueue first |
-| `active_candidate_set` is null (clear) | `2` | Report nothing to clear |
-| Any WI already in `candidate_queue` (enqueue) | `2` | Report duplicate, show which set contains it |
-| Any WI is in `active_candidate_set` (enqueue) | `2` | Report the WI is already under validation |
-| Not all WIs `done` (clear with completed) | `2` | Report which WIs are not done, suggest using `demoted` |
+| Condition | Exit | Action |
+|-----------|------|--------|
+| WI not found | `3` | Report missing IDs, list available |
+| WI not `implementing` (enqueue) | `2` | Report which WIs have wrong status |
+| Slot already occupied (activate) | `2` | Report active set ID and activated_at, suggest clearing first |
+| Queue empty (activate) | `2` | Report empty queue, suggest enqueue first |
+| Slot is null (clear) | `2` | Report nothing to clear |
+| WI already in queue (enqueue) | `2` | Report duplicate and which set contains it |
+| WI in active set (enqueue) | `2` | Report WI is under validation |
+| Not all WIs `done` (clear completed) | `2` | Report which WIs are not done, suggest `demoted` |
 | Stale revision | `2` | Report current vs expected, ask caller to re-read |
 
 ## Constraints
 
-- The `active_candidate_set` slot is exclusive — only one candidate set at a time. This is an invariant from the state schema.
-- **Fate-sharing:** All WIs in a batch set are treated as a unit. If validation fails, all WIs are demoted. Partial demotion is not supported.
-- Enqueue clears lease fields because the builder's implementation phase is over. Stale lease data on a non-implementing item creates confusion about ownership.
-- FIFO ordering of `candidate_queue` is preserved. No priority reordering.
-- Read `references/wi-schema.md` for normalization rules that apply to all work item writes.
+- **Exclusive slot:** Only one candidate set can be active at a time (invariant).
+- **Fate-sharing:** All WIs in a batch are a unit. Partial demotion is not supported.
+- **Lease clearing:** Enqueue clears lease fields because the builder's phase is over.
+- **FIFO ordering:** `candidate_queue` is strictly FIFO. No priority reordering.
+- See `references/wi-schema.md` for normalization rules on all work item writes.

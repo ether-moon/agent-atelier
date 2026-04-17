@@ -1,10 +1,10 @@
 ---
 name: monitors
-description: "Background monitor lifecycle — spawn continuous observers, poll for events, stop monitors, or check health. Use when starting the orchestration loop, polling for state changes, cleaning up on exit, or diagnosing monitor health. Triggers on 'spawn monitors', 'check monitors', 'stop monitors', 'monitor status', 'spawn ci monitor', 'poll events'."
+description: "Background monitor lifecycle — spawn continuous monitors, poll for events, stop monitors, or check health. Use when starting the orchestration loop, polling for state changes, cleaning up on exit, diagnosing monitor health, or tracking CI runs. Triggers on 'spawn monitors', 'check monitors', 'stop monitors', 'monitor status', 'spawn ci monitor', 'poll events', 'respawn', 'dead monitor', 'background processes', 'ci monitor', 'start monitors', 'kill monitors'."
 argument-hint: "spawn | check <task-ids-json> | stop [all | <name>] | status | spawn-ci --run-id <ID> | --pr <NUM>"
 ---
 
-# Monitors — Background Observer Lifecycle
+# Monitors — Background Monitor Lifecycle
 
 Monitors are long-running background processes that observe orchestration state and external systems, emitting structured NDJSON events to stdout. They **never write** to `.agent-atelier/**` — all state mutations triggered by monitor events are routed through the Orchestrator to the appropriate skill (watchdog, gate, execute).
 
@@ -98,21 +98,7 @@ Reads accumulated output from all active monitors and classifies events by urgen
    ```
 2. For each task ID, call `TaskOutput` with `block=false` to get current output without waiting.
 3. Parse each line as JSON (NDJSON format). Skip malformed lines.
-4. Classify events:
-
-| Event Type | Condition | Urgency |
-|------------|-----------|---------|
-| `heartbeat_warning` | `severity == "expired"` | IMMEDIATE |
-| `heartbeat_warning` | `severity == "warning"` | WARNING |
-| `gate_resolved` | — | IMMEDIATE |
-| `gate_opened` | — | IMMEDIATE |
-| `ci_status` | `conclusion == "success"` | IMMEDIATE |
-| `ci_status` | `conclusion == "failure"` or `"cancelled"` | IMMEDIATE |
-| `ci_status` | `conclusion == null` (in-progress) | INFO |
-| `branch_divergence` | `severity == "critical"` | IMMEDIATE |
-| `branch_divergence` | `severity == "warning"` | WARNING |
-| `state_committed` | — | INFO |
-
+4. Classify events into IMMEDIATE, WARNING, or INFO urgency levels. See `reference/event-classification.md` for the full classification table and orchestrator response protocol.
 5. Detect dead monitors: if `TaskOutput` returns an error or the task has exited with a non-zero code (for always-on monitors), flag it.
 6. Return the classified report.
 
@@ -124,30 +110,12 @@ Reads accumulated output from all active monitors and classifies events by urgen
   "immediate": [
     {"event": "heartbeat_warning", "severity": "expired", "work_item_id": "WI-014", "source": "heartbeat"}
   ],
-  "warning": [
-    {"event": "branch_divergence", "severity": "warning", "commits_behind": 7, "source": "divergence"}
-  ],
-  "info": [
-    {"event": "state_committed", "revision": 12, "source": "events"}
-  ],
+  "warning": [],
+  "info": [],
   "dead_monitors": ["gate"],
   "healthy_monitors": ["heartbeat", "events", "divergence"]
 }
 ```
-
-**Orchestrator response protocol** (for the CronCreate polling prompt):
-
-- **IMMEDIATE events:** Act within this polling cycle.
-  - `heartbeat_warning` (expired) → trigger `/agent-atelier:watchdog tick`
-  - `heartbeat_warning` (warning) → message Builder via `SendMessage` to send `execute heartbeat`
-  - `gate_resolved` → re-read gate state, resume blocked WIs
-  - `gate_opened` → present HDR to user immediately
-  - `ci_status` (success) → evaluate fast-track, then transition to IMPLEMENT or REVIEW_SYNTHESIS
-  - `ci_status` (failure/cancelled) → record validation failure, candidate demotion
-  - `branch_divergence` (critical) → inform user, strongly recommend rebase
-- **WARNING events:** Log for next human-visible status report.
-- **INFO events:** Update situational awareness, no action required.
-- **Dead monitors:** Re-spawn via `/agent-atelier:monitors spawn` (or `spawn-ci` for ci-status). If same monitor has died 3+ times in a session, escalate to user instead of retrying.
 
 ### `stop [all | <name>]`
 
@@ -155,41 +123,44 @@ Stops one or all monitors.
 
 1. If `all`: iterate all known task IDs and call `TaskStop` for each.
 2. If `<name>`: call `TaskStop` for the specified monitor's task ID.
-3. Return confirmation.
+3. Return confirmation with `{"stopped": [...], "stopped_at": "<ISO-8601 UTC>"}`.
 
 **Arguments:**
 - `all` — stop all monitors (used during DONE cleanup)
 - `<name>` — one of: `heartbeat`, `gate`, `events`, `divergence`, `ci-status`
-
-**Output:**
-
-```json
-{
-  "stopped": ["heartbeat", "gate", "events", "divergence"],
-  "stopped_at": "<ISO-8601 UTC>"
-}
-```
 
 ### `status`
 
 Reports current health of all monitors.
 
 1. For each known task ID, check whether the background task is still running.
-2. Return status summary.
+2. Return status summary with each monitor's `task_id`, `alive` boolean, and `exit_code` if dead.
 
-**Output:**
+## Examples
 
-```json
-{
-  "monitors": {
-    "heartbeat": {"task_id": "t1", "alive": true},
-    "gate": {"task_id": "t2", "alive": true},
-    "events": {"task_id": "t3", "alive": false, "exit_code": 1},
-    "divergence": {"task_id": "t4", "alive": true},
-    "ci-status": {"task_id": "t5", "alive": true, "target": "pr-42"}
-  },
-  "checked_at": "<ISO-8601 UTC>"
-}
+**Start all monitors at loop begin:**
+```
+/agent-atelier:monitors spawn
+```
+
+**Poll for events during orchestration (pass the task IDs from spawn):**
+```
+/agent-atelier:monitors check {"heartbeat":"bg_1","gate":"bg_2","events":"bg_3","divergence":"bg_4"}
+```
+
+**Track a CI run for a PR:**
+```
+/agent-atelier:monitors spawn-ci --pr 42
+```
+
+**Stop everything at loop end:**
+```
+/agent-atelier:monitors stop all
+```
+
+**Diagnose a monitor that may have died:**
+```
+/agent-atelier:monitors status
 ```
 
 ## Exit Codes
@@ -202,19 +173,19 @@ Reports current health of all monitors.
 
 ## Input Conventions
 
-- `check` accepts task IDs as a JSON object argument
-- `spawn-ci` requires either `--run-id` or `--pr` (mutually exclusive)
-- `stop` accepts `all` or a monitor name
+- `check` accepts task IDs as a JSON object argument.
+- `spawn-ci` requires either `--run-id` or `--pr` (mutually exclusive).
+- `stop` accepts `all` or a monitor name.
 
 ## Output Contract
 
-All subcommands return JSON to stdout. Diagnostic messages go to stderr.
+- All subcommands return JSON to stdout. Diagnostic messages go to stderr.
 
 ## Idempotency
 
-- `spawn` skips already-running monitors (same session)
-- `stop` on an already-stopped monitor returns `"changed": false`
-- `check` is inherently idempotent (read-only)
+- `spawn` skips already-running monitors (same session).
+- `stop` on an already-stopped monitor returns `"changed": false`.
+- `check` is inherently idempotent (read-only).
 
 ## Error Handling
 
@@ -232,4 +203,5 @@ All subcommands return JSON to stdout. Diagnostic messages go to stderr.
 - All state mutations triggered by events route through the Orchestrator to the appropriate skill
 - Monitor task IDs are **session-scoped** — they do not survive session restarts
 - ci-status is the only self-terminating monitor (exits 0 on CI completion)
+- On `ci_status` (success) → evaluate fast-track, then transition to IMPLEMENT or REVIEW_SYNTHESIS
 - The CronCreate poll job that invokes `check` is created by the `/run` skill, not by this skill

@@ -32,6 +32,15 @@ For `upsert`, the caller provides either:
 - Inline JSON: `upsert {"id": "WI-015", "title": "...", "status": "ready"}`
 - Natural language that you translate into the correct JSON structure
 
+## Examples
+
+```bash
+/agent-atelier:wi list
+/agent-atelier:wi show WI-014
+/agent-atelier:wi upsert {"id": "WI-016", "title": "Add retry logic", "status": "ready", "depends_on": ["WI-014"], "complexity": "simple"}
+/agent-atelier:wi upsert WI-015 set status to ready and complexity to complex
+```
+
 ## Execution Steps
 
 ### Subcommand: `list`
@@ -61,7 +70,7 @@ For `upsert`, the caller provides either:
 
 ### Subcommand: `upsert`
 
-This is the only subcommand that writes. Follow these steps carefully because the work item store uses revision-based concurrency control.
+This is the only subcommand that writes. Every upsert requires a `request_id` (unique string for idempotency) and a `based_on_revision` (the store revision observed when reading). Follow these steps carefully because the work item store uses revision-based concurrency control.
 
 1. **Read current store.** Read `.agent-atelier/work-items.json`. Note the current `revision`.
 
@@ -85,27 +94,7 @@ This is the only subcommand that writes. Follow these steps carefully because th
 
 ### Native Task Sync (after successful upsert)
 
-After a successful state-commit, sync the work item to the native Agent Teams task list. This creates a visibility layer with automatic dependency resolution. **Sync failures are non-fatal** — log a warning to stderr but do not fail the upsert. `work-items.json` is always the source of truth.
-
-7. **Find the canonical native task.** Call `TaskList` and collect all tasks whose subject starts with `"WI-NNN:"` (matching the target WI's ID prefix). Apply the deduplication rule:
-   - **0 matches:** No native task exists yet — proceed to step 8 (create) and steps 9–10 (wire dependencies).
-   - **1 match:** This is the canonical native task — skip to end (no dependency rewiring needed).
-   - **2+ matches:** Log a warning to stderr listing all duplicate task IDs. Use the task with the highest ID as the canonical one (newest). Ignore the others. This can happen after response loss during TaskCreate, partial retry, or manual cleanup failure. Skip to end.
-
-8. **Create if new.** Only if step 7 found 0 matches (this is a new WI), call `TaskCreate` with:
-   - `subject`: `"WI-NNN: <title>"`
-   - `description`: The WI's `title` and `why_now` fields, plus `"Tracked in .agent-atelier/work-items.json. Use /agent-atelier:status for detailed state."`
-   - `metadata`: `{"work_item_id": "WI-NNN"}`
-
-9. **Wire forward dependencies (create only).** Only after step 8 (new task creation). If `depends_on` is non-empty, for each dependency WI ID:
-   - Search `TaskList` for a task whose subject starts with the dependency WI's ID prefix
-   - Collect the found native task IDs
-   - Call `TaskUpdate` on the current WI's native task with `addBlockedBy` set to the collected IDs
-   - Skip any dependencies whose native tasks do not exist yet (they will be wired in step 10 when created)
-
-10. **Wire reverse dependencies (create only).** Only after step 8. Search `TaskList` for any tasks whose corresponding WIs (in `work-items.json`) have `depends_on` containing the current WI's ID. For each found, call `TaskUpdate` on that task with `addBlockedBy` pointing to the current WI's native task. This handles the case where a depending WI was created before its dependency.
-
-   **Why create-only:** Dependency wiring runs once at task creation. The `depends_on` field is immutable after first upsert (see normalization rule 8 in `wi-schema.md`), so re-wiring on subsequent updates would be redundant. Since the Agent Teams API only supports `addBlockedBy` (no removal), re-applying would at best be a no-op and at worst mask drift.
+After a successful state-commit, sync the work item to the native Agent Teams task list. Sync failures are non-fatal -- log a warning but do not fail the upsert. See `reference/native-task-sync.md` for the full deduplication, creation, and dependency-wiring protocol.
 
 ## Write Protocol
 
@@ -125,47 +114,13 @@ The script validates all revision checks before any write happens. If a revision
 | `3` | Work item not found for `show` |
 | `4` | Runtime or environment failure |
 
-## Input Conventions
-
-The `upsert` subcommand accepts payload via:
-- `--json '<inline-json>'` — inline JSON string
-- `--input <path>` — path to a JSON file
-
-Required flags for `upsert`:
-- `--request-id <id>` — unique request identifier for idempotency tracking
-- `--based-on-revision <N>` — the store revision observed at read time
-
 ## Output Contract
 
-**`list`** returns JSON to stdout:
+- **`list`**: JSON with `revision` and `items` array (each item has `id`, `title`, `status`, `owner_session_id`).
+- **`show`**: Full work item JSON object.
+- **`upsert`**: `{"request_id": "...", "accepted": true, "committed_revision": N, "changed": true, "artifacts": [".agent-atelier/work-items.json"]}`.
 
-```json
-{
-  "revision": 12,
-  "items": [
-    {"id": "WI-014", "title": "Checkout empty/loading states", "status": "implementing", "owner_session_id": "exec-WI-014-02"},
-    {"id": "WI-015", "title": "Payment retry logic", "status": "ready", "owner_session_id": null}
-  ]
-}
-```
-
-**`show`** returns the full work item JSON object to stdout.
-
-**`upsert`** returns the mutation response:
-
-```json
-{
-  "request_id": "REQ-104",
-  "accepted": true,
-  "committed_revision": 13,
-  "changed": true,
-  "artifacts": [
-    ".agent-atelier/work-items.json"
-  ]
-}
-```
-
-When presenting `list` or `show` to a human user, additionally render a readable table or detail view. Diagnostic messages go to stderr.
+When presenting to a human user, render a readable table (list) or detail view (show). Diagnostic messages go to stderr.
 
 ## Idempotency
 
