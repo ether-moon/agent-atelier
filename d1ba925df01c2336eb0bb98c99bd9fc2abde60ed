@@ -1,0 +1,24 @@
+## Decisions Made
+- Address all 11 CodeRabbit review comments in a single commit rather than per-file: keeps PR history clean and avoids unnecessary CI reruns
+- Treat state-machine.md line 29 comment as false positive: the file has no unlabeled fenced code blocks, only a markdown table at that line
+- Use best-effort WARNING tier for heartbeat_warning instead of promoting to IMMEDIATE: preserves the classification table semantics while clarifying the response protocol actions
+
+## Problems Encountered
+- watchdog/execution-details.md fence fix initially replaced the closing fence instead of the opening one: caught during verification read and corrected before commit
+- CodeRabbit comment on run/reference/state-machine.md line 29 pointed to a table row, not a fenced block: confirmed as false positive by grepping for bare fences (only one exists, already labeled json)
+
+## Constraints Identified
+- SKILL.md files must follow a strict section schema (Write Protocol, Subcommands, Input Conventions, Output Contract, Idempotency as separate headings): monitors and watchdog were missing required sections
+- Reference paths in skill files must use relative traversal to canonical plugins/agent-atelier/references/ location: ambiguous bare references/ paths break from skill subdirectories
+
+## Open Questions
+- None
+
+## Context
+Scanned PR #12 for blockers after a previous round fixed 5 CI test failures. Found CI passing and no merge conflicts, but 11 CodeRabbit review comments remained (4 Major, 7 Minor). Addressed all comments across 9 skill documentation files, verified all 58 tests still pass.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
