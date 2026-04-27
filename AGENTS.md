@@ -79,3 +79,12 @@ bash tests/all.sh
 - The summary follows the 7-section format: Decisions Made, Problems Encountered, Constraints Identified, Open Questions, Context, Recorded Decisions, Vault Entries Referenced
 - See `/knowledge-distillery:memento-commit` for the full workflow and format specification
 - If the PostToolUse hook fires a reminder, follow it — generate the summary and attach the note
+
+## Versioning
+
+The `bumping-version` skill (in `skill-set`) reads this section.
+
+- **Base branch**: main
+- **Commit message**: chore: bump version to {version}
+- **Extra version files**: (none — `plugins/agent-atelier/.claude-plugin/plugin.json` is auto-detected)
+- **Changelog categories**: Added, Improved, Fixed

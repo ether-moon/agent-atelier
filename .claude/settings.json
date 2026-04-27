@@ -16,32 +16,18 @@
       "Bash(*/build-vrm-prompt:*)"
     ]
   },
-  "enabledPlugins": {
-    "agent-atelier@agent-atelier": true,
-    "skill-set": true,
-    "knowledge-distillery@knowledge-distillery": true
-  },
   "extraKnownMarketplaces": {
-    "agent-atelier": {
+    "ether-plugins": {
       "source": {
         "source": "github",
-        "repo": "ether-moon/agent-atelier"
-      },
-      "autoUpdate": true
-    },
-    "skill-set": {
-      "source": {
-        "source": "github",
-        "repo": "ether-moon/skill-set"
-      },
-      "autoUpdate": true
-    },
-    "knowledge-distillery": {
-      "source": {
-        "source": "github",
-        "repo": "ether-moon/knowledge-distillery"
+        "repo": "ether-moon/ether-plugins"
       },
       "autoUpdate": true
     }
+  },
+  "enabledPlugins": {
+    "agent-atelier@ether-plugins": true,
+    "skill-set@ether-plugins": true,
+    "knowledge-distillery@ether-plugins": true
   }
 }
