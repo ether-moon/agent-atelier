@@ -78,7 +78,7 @@ When the 15-minute watchdog recovery cron fires, do this in order:
    - `ready` → claim through State Manager and dispatch a Builder
    - `implementing` with reachable owner → message that owner to continue
    - `implementing` with unreachable or missing owner session → requeue immediately through State Manager, set the reason to `watchdog: owner session unavailable after recovery pulse`, then dispatch a fresh Builder if capacity exists
-   - `candidate_validating` / `active_candidate` → reuse the current VRM if reachable, otherwise spawn a fresh VRM and resume validation without demoting the candidate
+   - `candidate_validating` / `active_candidate_set` → reuse the current VRM if reachable, otherwise spawn a fresh VRM and resume validation without demoting the candidate
    - `reviewing` → re-message reachable reviewers or re-spawn missing reviewers; if review artifacts are missing on disk, re-initiate review from persisted evidence
 5. Stay silent if the pulse produces no recovery, no dispatch, no respawn, and no user-facing escalation.
 
@@ -91,7 +91,7 @@ When `/agent-atelier:run` starts after a crash or restart, run one immediate res
 3. Requeue those stranded WIs immediately through State Manager with reason `cold-resume: owner session unavailable`.
 4. Resume other recoverable work from durable state:
    - `ready` → normal Builder claim and dispatch
-   - `candidate_validating` / `active_candidate` → spawn or reuse VRM without demoting the candidate
+   - `candidate_validating` / `active_candidate_set` → spawn or reuse VRM without demoting the candidate
    - `reviewing` → re-message or re-spawn reviewers from persisted artifacts
    - recreate the ci-status monitor if validation was already in progress
 5. Do not separately recreate monitors or cron jobs outside `/agent-atelier:run`; the run skill owns that lifecycle.

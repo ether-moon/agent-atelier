@@ -143,10 +143,11 @@ for agent_name in $EXPECTED_AGENTS; do
     fail "agent definition '${agent_name}.md' not found"
   fi
 done
-if [ "$AGENT_COUNT" -eq 7 ]; then
+ACTUAL_AGENT_COUNT=$(find "$AGENTS_DIR" -maxdepth 1 -type f -name "*.md" | wc -l | tr -d ' ')
+if [ "$AGENT_COUNT" -eq 7 ] && [ "$ACTUAL_AGENT_COUNT" -eq 7 ]; then
   pass "total spawnable agent count = 7"
 else
-  fail "expected 7 spawnable agents, found $AGENT_COUNT"
+  fail "expected exactly 7 spawnable agents (required=7, found_required=$AGENT_COUNT, actual_files=$ACTUAL_AGENT_COUNT)"
 fi
 
 # ── Non-spawnable role prompts (lead-only and dormant) ───────────────
@@ -162,10 +163,11 @@ for prompt_name in $EXPECTED_PROMPTS; do
     fail "role prompt '${prompt_name}.md' not found"
   fi
 done
-if [ "$PROMPT_COUNT" -eq 3 ]; then
+ACTUAL_PROMPT_COUNT=$(find "$PROMPTS_DIR" -maxdepth 1 -type f -name "*.md" | wc -l | tr -d ' ')
+if [ "$PROMPT_COUNT" -eq 3 ] && [ "$ACTUAL_PROMPT_COUNT" -eq 3 ]; then
   pass "total non-spawnable role prompt count = 3"
 else
-  fail "expected 3 non-spawnable role prompts, found $PROMPT_COUNT"
+  fail "expected exactly 3 non-spawnable role prompts (required=3, found_required=$PROMPT_COUNT, actual_files=$ACTUAL_PROMPT_COUNT)"
 fi
 
 # ── State defaults validation ────────────────────────────────────────

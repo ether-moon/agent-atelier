@@ -148,7 +148,7 @@ Run once after the core team and monitor infrastructure are restored, before ent
    - do not wait for lease expiry
 3. Resume other recoverable work from durable state:
    - `ready` -> follow the normal Builder claim and dispatch flow
-   - `active_candidate` / `candidate_validating` -> re-message a reachable VRM or spawn a fresh VRM and continue validation without demotion
+   - `active_candidate_set` / `candidate_validating` -> re-message a reachable VRM or spawn a fresh VRM and continue validation without demotion
    - `reviewing` -> re-message reachable reviewers or respawn them from persisted review artifacts
    - if CI was already running for the active candidate, recreate the ci-status monitor if needed
 4. Only after this sweep completes, present the startup status dashboard and continue into the normal orchestration loop.
