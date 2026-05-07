@@ -1,6 +1,6 @@
 ---
 name: watchdog
-description: "Health check and mechanical recovery — detect stale leases, expired candidates, stuck reviews, and blocked work items, then take safe recovery actions. Also enforces operating budgets and replays interrupted transactions. Use for routine health checks, when something seems stuck, or when the user says 'watchdog', 'health check', 'check for stale items', 'anything stuck?', 'run maintenance', 'check budgets', 'recovery sweep', or 'clean up orphaned leases'. Also appropriate after a session crash or long idle period."
+description: "Health check and mechanical recovery — detect stale leases, expired candidates, stuck reviews, and blocked work items; enforce operating budgets; replay interrupted transactions. Use for routine health checks, after a session crash or long idle, or when something seems stuck. Triggers on 'watchdog', 'health check', 'anything stuck?', 'check for stale items', 'check budgets', 'recovery sweep', 'orphaned leases', 'run maintenance'."
 argument-hint: "[tick]"
 ---
 

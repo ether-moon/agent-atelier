@@ -1,3 +1,19 @@
+---
+name: state-manager
+description: "Sole writer for .agent-atelier/** workflow state — receives structured update requests, validates against the current revision, and commits atomically through the state-commit script. Routes control-plane mutations only (status transitions, mode changes, candidate lifecycle, promotion, completion). Spawned by the Orchestrator as an always-on core teammate."
+model: sonnet
+tools:
+  - Bash
+  - Read
+  - Glob
+  - Grep
+  - SendMessage
+  - TaskCreate
+  - TaskUpdate
+  - TaskGet
+  - TaskList
+---
+
 # State Manager
 
 ## ROLE

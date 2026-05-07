@@ -54,15 +54,15 @@ After team creation, persist the derived team name to loop-state via `state-comm
 
 ## Core Team (Always-On)
 
-Spawn each core teammate by referencing their agent type from `.claude/agents/`:
+Spawn each core teammate by referencing their plugin-scoped agent type from the plugin's `agents/` directory:
 
 | Role | Agent Type | Mode | Model | Key Tool Differences |
 |------|-----------|------|-------|---------------------|
-| State Manager | `state-manager` | `acceptEdits` | `sonnet` | Bash (for state-commit) but no Write/Edit |
-| PM | `pm` | `acceptEdits` | `opus` | Write/Edit (for docs) but no Bash |
-| Architect | `architect` | `acceptEdits` | `opus` | Write/Edit (for docs) but no Bash |
+| State Manager | `agent-atelier:state-manager` | `acceptEdits` | `sonnet` | Bash (for state-commit) but no Write/Edit |
+| PM | `agent-atelier:pm` | `acceptEdits` | `opus` | Write/Edit (for docs) but no Bash |
+| Architect | `agent-atelier:architect` | `acceptEdits` | `opus` | Write/Edit (for docs) but no Bash |
 
-Spawn with: `"Spawn a teammate using the state-manager agent type"` (etc. for each role). The agent definition's `model` and `tools` fields are applied automatically. The role prompt body from the plugin's `references/prompts/` directory is appended as additional instructions.
+Spawn with: `"Spawn a teammate using the agent-atelier:state-manager agent type"` (etc. for each role). The agent definition's `model`, `tools`, and full role prompt body are loaded from `plugins/agent-atelier/agents/<role>.md` automatically.
 
 The **Orchestrator** role is played by the lead agent (you) -- do not spawn a separate teammate for it. Read `plugins/agent-atelier/references/prompts/orchestrator.md` (from repo root) as your own operating guide. Orchestrator, PM, and Architect use Opus (judgment-heavy roles); all other teammates use Sonnet (execution-focused roles).
 
@@ -70,12 +70,12 @@ The **Orchestrator** role is played by the lead agent (you) -- do not spawn a se
 
 | Role | Agent Type | When to Spawn | When to Shutdown | Model |
 |------|-----------|--------------|------------------|-------|
-| Builder(s) | `builder` | WI enters `ready` and BUILD_PLAN/IMPLEMENT phase | After WI completion or requeue | `sonnet` |
-| VRM | `vrm` | Candidate enters `active_candidate_set` | After evidence bundle produced | `sonnet` |
-| QA Reviewer | `qa-reviewer` | REVIEW_SYNTHESIS phase begins | After findings submitted | `sonnet` |
-| UX Reviewer | `ux-reviewer` | REVIEW_SYNTHESIS phase begins | After findings submitted | `sonnet` |
+| Builder(s) | `agent-atelier:builder` | WI enters `ready` and BUILD_PLAN/IMPLEMENT phase | After WI completion or requeue | `sonnet` |
+| VRM | `agent-atelier:vrm` | Candidate enters `active_candidate_set` | After evidence bundle produced | `sonnet` |
+| QA Reviewer | `agent-atelier:qa-reviewer` | REVIEW_SYNTHESIS phase begins | After findings submitted | `sonnet` |
+| UX Reviewer | `agent-atelier:ux-reviewer` | REVIEW_SYNTHESIS phase begins | After findings submitted | `sonnet` |
 
-Spawn conditional roles by referencing agent type: `"Spawn a teammate using the builder agent type to implement WI-014"`.
+Spawn conditional roles by referencing agent type: `"Spawn a teammate using the agent-atelier:builder agent type to implement WI-014"`.
 Shut down via `SendMessage({type: "shutdown_request"})` when their phase ends.
 
 > **Note:** `skills` and `mcpServers` frontmatter in subagent definitions are NOT applied when running as a teammate (known limitation). Teammates load skills and MCP servers from project settings. The `tools` allowlist and role prompt body ARE applied.
@@ -88,7 +88,7 @@ Check the WI's `complexity` field in `work-items.json`:
 - **`simple`**: Spawn with `mode: "acceptEdits"`. Builder implements immediately.
 - **`complex`**: Spawn with `mode: "plan"`. The Builder starts in read-only plan mode -- Write/Edit tools are blocked by the harness. The Builder proposes a plan, calls `ExitPlanMode`, which sends a structured `plan_approval_request` to the Orchestrator. After `plan_approval_response(approve: true)`, the Builder's permission mode auto-transitions to `bypassPermissions` for implementation.
 
-For complex WIs: `"Spawn a teammate using the builder agent type to implement WI-014"` with `mode: "plan"`. The plan approval flow is mechanical -- no prompt instruction needed. See the Orchestrator's Plan Review Protocol for approval criteria.
+For complex WIs: `"Spawn a teammate using the agent-atelier:builder agent type to implement WI-014"` with `mode: "plan"`. The plan approval flow is mechanical -- no prompt instruction needed. See the Orchestrator's Plan Review Protocol for approval criteria.
 
 > **Why `mode: "plan"` and not prompt instructions?** Empirically verified: prompt-only plan approval produces plain text plans without structured messaging. Only `mode: "plan"` triggers the `ExitPlanMode` -> `plan_approval_request` -> `plan_approval_response` protocol that the Orchestrator can process programmatically.
 
@@ -148,7 +148,7 @@ Run once after the core team and monitor infrastructure are restored, before ent
    - do not wait for lease expiry
 3. Resume other recoverable work from durable state:
    - `ready` -> follow the normal Builder claim and dispatch flow
-   - `active_candidate` / `candidate_validating` -> re-message a reachable VRM or spawn a fresh VRM and continue validation without demotion
+   - `active_candidate_set` / `candidate_validating` -> re-message a reachable VRM or spawn a fresh VRM and continue validation without demotion
    - `reviewing` -> re-message reachable reviewers or respawn them from persisted review artifacts
    - if CI was already running for the active candidate, recreate the ci-status monitor if needed
 4. Only after this sweep completes, present the startup status dashboard and continue into the normal orchestration loop.

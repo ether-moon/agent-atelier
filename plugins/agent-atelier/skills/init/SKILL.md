@@ -23,6 +23,15 @@ argument-hint: "[--root <path>]"
 - Write (create state files)
 - Bash (create directories, detect git root)
 
+## Write Protocol
+
+Init bootstraps state files directly with the Write tool — `state-commit` is reserved for ongoing state mutations and assumes the workspace already exists. To stay safe:
+
+- Read each target file first; only Write if it does not exist (never overwrite — existing files may contain in-progress work).
+- Use the default shapes from `references/state-defaults.md`; replace every `<now>` with the current UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`).
+- If `.agent-atelier/.pending-tx.json` exists, replay it via `state-commit --replay` before reporting success — a previous transaction was interrupted.
+- All operations are idempotent: re-running with files present yields `"changed": false`.
+
 ## Usage Examples
 
 ```

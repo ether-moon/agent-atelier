@@ -130,9 +130,29 @@ for ref_name in $EXPECTED_REFS; do
   fi
 done
 
-# ── Role prompt files ────────────────────────────────────────────────
+# ── Spawnable agent definitions ──────────────────────────────────────
+AGENTS_DIR="$ROOT/plugins/agent-atelier/agents"
+EXPECTED_AGENTS="state-manager pm architect builder vrm qa-reviewer ux-reviewer"
+AGENT_COUNT=0
+for agent_name in $EXPECTED_AGENTS; do
+  agent_path="$AGENTS_DIR/${agent_name}.md"
+  if [ -f "$agent_path" ]; then
+    pass "agent definition '${agent_name}.md' exists"
+    AGENT_COUNT=$((AGENT_COUNT + 1))
+  else
+    fail "agent definition '${agent_name}.md' not found"
+  fi
+done
+ACTUAL_AGENT_COUNT=$(find "$AGENTS_DIR" -maxdepth 1 -type f -name "*.md" | wc -l | tr -d ' ')
+if [ "$AGENT_COUNT" -eq 7 ] && [ "$ACTUAL_AGENT_COUNT" -eq 7 ]; then
+  pass "total spawnable agent count = 7"
+else
+  fail "expected exactly 7 spawnable agents (required=7, found_required=$AGENT_COUNT, actual_files=$ACTUAL_AGENT_COUNT)"
+fi
+
+# ── Non-spawnable references (lead-only role guides + shared profile) ─
 PROMPTS_DIR="$ROOT/plugins/agent-atelier/references/prompts"
-EXPECTED_PROMPTS="orchestrator state-manager pm architect builder vrm qa-reviewer ux-reviewer ui-designer aesthetic-ux-reviewer"
+EXPECTED_PROMPTS="orchestrator ui-designer aesthetic-ux-reviewer output-discipline"
 PROMPT_COUNT=0
 for prompt_name in $EXPECTED_PROMPTS; do
   prompt_path="$PROMPTS_DIR/${prompt_name}.md"
@@ -143,10 +163,11 @@ for prompt_name in $EXPECTED_PROMPTS; do
     fail "role prompt '${prompt_name}.md' not found"
   fi
 done
-if [ "$PROMPT_COUNT" -eq 10 ]; then
-  pass "total role prompt count = 10"
+ACTUAL_PROMPT_COUNT=$(find "$PROMPTS_DIR" -maxdepth 1 -type f -name "*.md" | wc -l | tr -d ' ')
+if [ "$PROMPT_COUNT" -eq 4 ] && [ "$ACTUAL_PROMPT_COUNT" -eq 4 ]; then
+  pass "total non-spawnable reference count = 4"
 else
-  fail "expected 10 role prompts, found $PROMPT_COUNT"
+  fail "expected exactly 4 non-spawnable references (required=4, found_required=$PROMPT_COUNT, actual_files=$ACTUAL_PROMPT_COUNT)"
 fi
 
 # ── State defaults validation ────────────────────────────────────────
