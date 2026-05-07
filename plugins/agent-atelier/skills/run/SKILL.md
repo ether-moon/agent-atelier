@@ -44,7 +44,7 @@ On a clean start, the loop begins at DISCOVER and drives through to DONE. On col
 
 Create one flat team and spawn teammates. Full details in `reference/team-lifecycle.md`.
 
-**Summary:** Derive a deterministic team name from the repo root, clean up stale teams, then spawn the three always-on core teammates (State Manager, PM, Architect) from `.claude/agents/` definitions. The Orchestrator role is played by the lead agent. Conditional specialists (Builders, VRM, reviewers) are spawned on-demand as work progresses.
+**Summary:** Derive a deterministic team name from the repo root, clean up stale teams, then spawn the three always-on core teammates (State Manager, PM, Architect) from the plugin's `agents/` definitions (scoped as `agent-atelier:<role>`). The Orchestrator role is played by the lead agent. Conditional specialists (Builders, VRM, reviewers) are spawned on-demand as work progresses.
 
 After the team is running:
 1. Start background monitors via `/agent-atelier:monitors spawn`
