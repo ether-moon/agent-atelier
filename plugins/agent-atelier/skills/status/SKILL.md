@@ -1,6 +1,7 @@
 ---
 name: status
 description: "Show the orchestration dashboard — current loop mode, work item summary, active candidate set, candidate queue, open gates, and next action. Use when checking progress, understanding what's happening, reviewing the backlog, recovering from a crash, or at the start of any session. Triggers on 'status', 'show state', 'what's going on', 'dashboard', 'where are we', 'progress', 'overview', 'how's it going', 'what's next', or 'orchestration report'. The go-to skill for situational awareness."
+argument-hint: ""
 ---
 
 # Status — Orchestration Dashboard

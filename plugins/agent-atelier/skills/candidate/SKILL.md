@@ -1,6 +1,6 @@
 ---
 name: candidate
-description: "Candidate pipeline lifecycle — enqueue work items as a candidate set for validation, activate the next queued set into the exclusive validation slot, or clear the active set after completion or demotion. Supports single and batch candidates with fate-sharing semantics. Use when a builder finishes implementation, when the orchestrator needs to start validation, or when validation passes or fails. Triggers on 'candidate', 'enqueue candidate', 'activate candidate', 'clear candidate', 'promote to candidate', 'candidate queue', 'next candidate', 'demote candidate', 'candidate ready', 'submit for validation', or 'validation slot'."
+description: "Candidate pipeline lifecycle — enqueue work items as a candidate set, activate the next queued set into the validation slot, or clear after completion/demotion. Supports single and batch candidates with fate-sharing. Use when a builder finishes implementation, validation starts, or validation passes/fails. Triggers on 'candidate', 'enqueue/activate/clear candidate', 'promote candidate', 'submit for validation', 'validation slot'."
 argument-hint: "enqueue <WI-ID>[,WI-ID,...] --branch <name> --commit <sha> | activate | clear [--reason completed|demoted]"
 ---
 
