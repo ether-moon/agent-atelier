@@ -1,0 +1,26 @@
+## Decisions Made
+- Apply CodeRabbit Major (active_candidate naming) and Nitpick (strict count assertions) as a single OBVIOUS-class commit: both fixes are mechanical, single-line in nature, and were already present as uncommitted edits in the working tree matching CodeRabbit's suggested patches verbatim.
+- Extend the L151 rename to two additional sites in orchestrator.md (L81, L94) that used the same incorrect token, even though CodeRabbit only flagged team-lifecycle.md. Rationale: same vocabulary fix; leaving orchestrator.md inconsistent would re-trigger the resume-misrouting risk in a different code path.
+- Exclude four unrelated SKILL.md edits (candidate, init, status, watchdog) from this commit per user instruction; they remain unstaged for a future commit. Rationale: keeps the review-feedback commit narrowly scoped and accurately labeled.
+- Delete two untracked items (`.claude/scheduled_tasks.lock`, `plugins/agent-atelier-workspace/`) per user instruction. The lockfile is a transient session artifact; the workspace dir is unrelated stray output.
+
+## Problems Encountered
+- CodeRabbit's inline-comments API endpoint returned empty; the review's findings were embedded in the review body as "outside diff range comments". Resolved by fetching `repos/{owner}/{repo}/pulls/{pr}/reviews/{id}` body directly.
+- Initial scan suggested fixes still needed to be made; closer inspection of `git diff HEAD` revealed both fixes were already in the working tree. Shifted from "apply fixes" to "verify, scope, and commit" workflow.
+
+## Constraints Identified
+- Project policy mandates `/knowledge-distillery:memento-commit` for every commit (a hook blocks raw `git commit`); raw `git commit` would fail.
+- Recent commits use English (`fix:`, `feat:`, `refactor:`, `docs:`) despite CLAUDE.md noting Korean is acceptable. Match English to stay consistent with the PR-14 history.
+- Working tree had unrelated WIP edits at the time of this commit; explicit pathspec staging (no `git add -A`) was required to keep the commit scoped to review-feedback only.
+
+## Open Questions
+- The four unrelated SKILL.md edits (candidate/init/status/watchdog) remain in the working tree. Their provenance is unclear (likely leftover from a prior session). Not addressed in this commit per user direction.
+
+## Context
+Processing CodeRabbit review on PR #14 (init-missing-agent-defs branch, repo ether-moon/agent-atelier). The review surfaced two findings: a Major naming inconsistency in plugins/agent-atelier/skills/run/reference/team-lifecycle.md (active_candidate vs active_candidate_set) and a Nitpick strict-count check in tests/all.sh. Both fixes were already applied in the working tree but uncommitted; the session resolved scope (which files to include), staged only the three review-related files (orchestrator.md, team-lifecycle.md, tests/all.sh), and committed.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
