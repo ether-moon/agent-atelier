@@ -1,0 +1,23 @@
+## Decisions Made
+- Add `output-discipline` to `EXPECTED_PROMPTS` and raise the expected count from 3 to 4: the shared OUTPUT DISCIPLINE profile lives alongside role prompts in `references/prompts/`, so the strict count assertion (introduced by CodeRabbit's nitpick) must include it. Excluding it required carving an exception from the directory's `*.md` count, which is harder to maintain than just listing it.
+- Rename the test section header from "Non-spawnable role prompts" to "Non-spawnable references" to reflect that the directory now holds both lead-only role guides (orchestrator, ui-designer, aesthetic-ux-reviewer) and a shared profile (output-discipline).
+- Apply the fix directly via lead-agent Direct Implementation Exception rather than re-dispatching `resolving-pr-blockers`: trivial single-line list addition, all executors idle, well-understood failure surface — the agent dispatch overhead is not justified.
+
+## Problems Encountered
+- CI on PR #14 failed on the `test` workflow after Cycle 1's fix push. Root cause: CodeRabbit's "tighten count assertion" patch added `actual_files == expected` checks; the existing EXPECTED list omitted `output-discipline.md` (intentional design, but stale w.r.t. the new strict comparison). Local `tests/all.sh` reproduced immediately.
+
+## Constraints Identified
+- The `references/prompts/` directory now serves dual purposes (role guides + shared profiles); future additions of either type require updating EXPECTED_PROMPTS and the count to keep the strict assertion green.
+- shipping-pr workflow normally delegates fixes to `resolving-pr-blockers`; bypassing that requires the Direct Implementation Exception (executors idle + single trivial fix). Used here to save a ~6-min agent round trip on a one-line change.
+
+## Open Questions
+- Whether to refactor `references/prompts/` into separate subdirectories (e.g. `role-guides/` for orchestrator/ui-designer/aesthetic-ux-reviewer and `shared/` for output-discipline) to remove the dual-purpose ambiguity. Out of scope for this commit.
+
+## Context
+PR #14 ship cycle 2 in `/Users/ether/conductor/workspaces/agent-atelier/madrid` on branch `init-missing-agent-defs`. After Cycle 1's CodeRabbit auto-fix landed in `ff47ef5`, CI's `test` job failed because the strengthened count assertion in `tests/all.sh` rejected the directory's actual file count. Updated EXPECTED_PROMPTS, ran the suite locally (60/0), staged only `tests/all.sh`, and committed via memento-commit for the next ship cycle to re-poll.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
