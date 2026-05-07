@@ -150,9 +150,9 @@ else
   fail "expected exactly 7 spawnable agents (required=7, found_required=$AGENT_COUNT, actual_files=$ACTUAL_AGENT_COUNT)"
 fi
 
-# ── Non-spawnable role prompts (lead-only and dormant) ───────────────
+# ── Non-spawnable references (lead-only role guides + shared profile) ─
 PROMPTS_DIR="$ROOT/plugins/agent-atelier/references/prompts"
-EXPECTED_PROMPTS="orchestrator ui-designer aesthetic-ux-reviewer"
+EXPECTED_PROMPTS="orchestrator ui-designer aesthetic-ux-reviewer output-discipline"
 PROMPT_COUNT=0
 for prompt_name in $EXPECTED_PROMPTS; do
   prompt_path="$PROMPTS_DIR/${prompt_name}.md"
@@ -164,10 +164,10 @@ for prompt_name in $EXPECTED_PROMPTS; do
   fi
 done
 ACTUAL_PROMPT_COUNT=$(find "$PROMPTS_DIR" -maxdepth 1 -type f -name "*.md" | wc -l | tr -d ' ')
-if [ "$PROMPT_COUNT" -eq 3 ] && [ "$ACTUAL_PROMPT_COUNT" -eq 3 ]; then
-  pass "total non-spawnable role prompt count = 3"
+if [ "$PROMPT_COUNT" -eq 4 ] && [ "$ACTUAL_PROMPT_COUNT" -eq 4 ]; then
+  pass "total non-spawnable reference count = 4"
 else
-  fail "expected exactly 3 non-spawnable role prompts (required=3, found_required=$PROMPT_COUNT, actual_files=$ACTUAL_PROMPT_COUNT)"
+  fail "expected exactly 4 non-spawnable references (required=4, found_required=$PROMPT_COUNT, actual_files=$ACTUAL_PROMPT_COUNT)"
 fi
 
 # ── State defaults validation ────────────────────────────────────────
