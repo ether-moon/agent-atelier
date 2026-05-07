@@ -1,0 +1,30 @@
+## Decisions Made
+- Ship spawnable subagents from the plugin's own `agents/` directory: aligns with Claude Code's standard plugin discovery path and lets agents be available as `agent-atelier:<role>` automatically; the prior `.claude/agents/` thin-import scheme required undocumented per-project setup.
+- Inline role prompt body into each agent definition (frontmatter + full body): avoids the cross-file `@-import` indirection that broke when `references/prompts/` files moved, and keeps the agent self-contained.
+- Keep `references/prompts/` for the four non-spawnable prompts (orchestrator, output-discipline, ui-designer, aesthetic-ux-reviewer): orchestrator is read directly by the lead agent and the other two are dormant references; relocating them would touch unrelated docs.
+- Use plugin-scoped subagent names in spawn instructions (`agent-atelier:state-manager` etc.): unambiguous resolution, removes name collision risk with project-level definitions.
+- Match each agent's `tools:` list to the previous `.claude/agents/<role>.md` thin definitions exactly: those lists encoded deliberate tool restrictions (e.g. State Manager has Bash but not Write/Edit; reviewers are Read/Grep/Glob only).
+
+## Problems Encountered
+- Initial assumption that `.claude/agents/` was empty was wrong: the repo already had 7 thin `@-import` shims pointing at `references/prompts/<role>.md`, which broke when those prompt files were deleted. Resolved by deleting the shims as well.
+- Test `tests/all.sh` enforced a fixed list of 10 role prompts in `references/prompts/`. Resolved by splitting validation into 7 spawnable agents (in `agents/`) plus 3 non-spawnable prompts (in `references/prompts/`).
+- VRM tools list was almost given Write capability; reviewing the existing thin def showed Bash-only output (test runners write evidence files), so the original tool restriction was preserved.
+
+## Constraints Identified
+- Plugin discovery path is fixed by Claude Code: subagent definitions must live at `<plugin-root>/agents/<name>.md`, not nested inside skills or `.claude-plugin/`. Bundling agents anywhere else makes them invisible to the harness.
+- `skills` and `mcpServers` frontmatter on subagent definitions are ignored when running as a teammate (known harness limitation, Issue #30703). Only `model`, `tools`, `description`, and the body are applied — drove the decision to keep tool lists explicit.
+- Project-level `.claude/agents/<role>.md` files can shadow plugin-scoped agents and create naming conflicts; deleting them prevents `state-manager` (project) vs `agent-atelier:state-manager` (plugin) ambiguity in this dogfood repo.
+
+## Open Questions
+- Whether `ui-designer` and `aesthetic-ux-reviewer` should be promoted to spawnable agents (they have full role bodies but are absent from team-lifecycle's spawn tables). Deferred — out of scope for this fix.
+- Whether to bump the plugin version (0.1.4 → 0.1.5) in this PR or as a follow-up. Pending user decision.
+- Historical references in `docs/design/system-design.md` and `docs/superpowers/specs/2026-04-16-orchestration-v02-design.md` to `references/prompts/<role>.md` for the moved roles: left as-is because they describe past design decisions, but a future doc pass could refresh them.
+
+## Context
+Worked in `/Users/ether/conductor/workspaces/agent-atelier/madrid` on branch `init-missing-agent-defs`. The user reported `/agent-atelier:run` failing because no subagent definitions were registered. Investigation showed the plugin shipped role prompts under `references/prompts/` and relied on consumers creating `.claude/agents/<role>.md` `@-import` shims manually. Created `plugins/agent-atelier/agents/{state-manager,pm,architect,builder,vrm,qa-reviewer,ux-reviewer}.md` with frontmatter + inlined bodies, deleted the 7 prompt duplicates and 7 thin shims, updated `skills/run/SKILL.md`, `skills/run/reference/team-lifecycle.md`, and `tests/all.sh`. All 59 tests pass.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
