@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.5] - 2026-05-07
+
+### Fixed
+
+- **plugin**: ship spawnable subagent definitions inside the plugin's own `agents/` directory so `/agent-atelier:run` no longer requires consumers to author thin `.claude/agents/<role>.md` `@-import` shims (#14)
+
+### Improved
+
+- **dogfooding**: switch dogfooding setup to consume the plugin via the `ether-plugins` hub instead of a project-local copy (#13)
+
 ## [0.1.4] - 2026-04-17
 
 ### Improved
