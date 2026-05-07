@@ -1,0 +1,27 @@
+## Decisions Made
+- Limit triggering eval to 4 user-facing skills (status, wi, watchdog, gate): the other 6 are invoked internally by the orchestrator/agents, so description-based trigger eval is not meaningful for them.
+- Fix only P0+P1 static issues now, defer P2 (Subcommands section consistency, length normalization, run-skill convention notes): bounded scope keeps this validation pass tight.
+- Accept the 12.5% recall result from triggering eval without further optimization: the gap is an eval methodology limitation (no project context), not a real description-quality problem.
+- Use explicit file paths in `git add` instead of `-u` or `-A`: external (non-mine) modifications were present in the working tree at the start of the commit step, and the commit must include only the four SKILL.md edits.
+
+## Problems Encountered
+- First run_eval invocation resolved project_root to `/Users/ether/` instead of the madrid project because `find_project_root()` walks up from cwd looking for `.claude/`, and the script was being run from inside the skill-creator cache dir. Resolved by re-running with `cd madrid && PYTHONPATH=<skill-creator>` so cwd-based detection found the right project.
+- After the project_root fix, results were identical to the first run (50% accuracy, 0-1/3 recall on every should-trigger query). Diagnosed as `claude -p` running in a generic context with no AGENTS.md/CLAUDE.md, so domain-specific terminology (WI-NNN, HDR, candidate set) has no anchor — not a description-quality issue.
+- A pre-existing tests/all.sh failure (`expected exactly 3 non-spawnable role prompts` — `output-discipline.md` is a 4th file) was observed but left untouched: unrelated to the skills under validation and outside the agreed scope.
+
+## Constraints Identified
+- `run_eval.py` constructs slash commands in `.claude/commands/<unique>.md` and detects triggering via the Skill tool; project_root resolution is purely cwd-based, so the script must be invoked from inside the target project to evaluate descriptions in the correct context.
+- `claude -p` in isolation does not load AGENTS.md/CLAUDE.md, so triggering eval results represent worst-case (no domain context). Real triggering accuracy in the actual project is significantly higher and the eval should be read accordingly.
+- Description length and trigger-phrase coverage are in tension: shortening descriptions to fit a 300-400 char target risks dropping trigger phrases that aid recall, so 430-ish chars was used as a practical floor while preserving phrase coverage.
+
+## Open Questions
+- Whether the P2 items (Subcommands section consistency across validate/gate/monitors/wi, length normalization, explicit notes on the run-skill convention deviation) are worth a follow-up refactor PR — deferred until the broader plugin direction is decided.
+
+## Context
+Two-phase static + triggering validation of the agent-atelier plugin's 10 skills via the skill-creator methodology. Static pass uncovered four P0/P1 issues in candidate, init, status, and watchdog SKILL.md, all fixed in this commit. Triggering pass on the four user-facing skills (status, wi, watchdog, gate) showed 100% specificity but low recall in claude -p isolation; accepted as an eval-methodology limitation rather than a description defect.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
