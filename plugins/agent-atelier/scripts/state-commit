@@ -510,6 +510,83 @@ def main():
         lock_fd.close()
 
 
+def _validate_implement_gate(root, writes):
+    """Mechanical gate: mode: BUILD_PLAN → IMPLEMENT requires valid plan_approval.
+
+    Returns None on pass, or a (exit_code, reason, kwargs) tuple on rejection.
+    """
+    # Find loop-state.json write
+    ls_write = None
+    for w in writes:
+        if w["path"].endswith("loop-state.json"):
+            ls_write = w
+            break
+    if ls_write is None:
+        return None
+
+    new_content = ls_write.get("content")
+    if not isinstance(new_content, dict):
+        return None
+    new_mode = new_content.get("mode")
+    if new_mode != "IMPLEMENT":
+        return None
+
+    # Read old mode to detect transition
+    old_path = resolve_tx_path(root, ls_write["path"])
+    old_mode = None
+    if os.path.exists(old_path):
+        with open(old_path, encoding="utf-8") as fh:
+            old_mode = json.load(fh).get("mode")
+
+    if old_mode == "IMPLEMENT":
+        # Already in IMPLEMENT — not a transition; allow.
+        return None
+
+    # Validate plan_approval
+    pa = new_content.get("plan_approval")
+    if not isinstance(pa, dict):
+        return (2, "implement_gate_violation",
+                {"reason_detail": "plan_approval missing or null"})
+
+    # Compute current hashes
+    import sys
+    plugin_scripts = os.path.dirname(os.path.realpath(__file__))
+    if plugin_scripts not in sys.path:
+        sys.path.insert(0, plugin_scripts)
+    from _plan_hash import wi_plan_hash, spec_hash
+
+    # Find work-items.json — either in this transaction or on disk
+    wi_items = None
+    for w in writes:
+        if w["path"].endswith("work-items.json"):
+            wic = w.get("content")
+            if isinstance(wic, dict):
+                wi_items = wic.get("items", [])
+                break
+    if wi_items is None:
+        wi_path = resolve_tx_path(root, ".agent-atelier/work-items.json")
+        if os.path.exists(wi_path):
+            with open(wi_path, encoding="utf-8") as fh:
+                wi_items = json.load(fh).get("items", [])
+        else:
+            wi_items = []
+
+    expected_plan_hash = wi_plan_hash(wi_items)
+    if pa.get("wi_plan_hash") != expected_plan_hash:
+        return (2, "implement_gate_violation",
+                {"reason_detail": "wi_plan_hash mismatch",
+                 "expected": expected_plan_hash, "actual": pa.get("wi_plan_hash")})
+
+    spec_path = os.path.join(root, "docs/product/behavior-spec.md")
+    expected_spec_hash = spec_hash(spec_path)
+    if pa.get("spec_hash") != expected_spec_hash:
+        return (2, "implement_gate_violation",
+                {"reason_detail": "spec_hash mismatch",
+                 "expected": expected_spec_hash, "actual": pa.get("spec_hash")})
+
+    return None
+
+
 def _commit(root, tx, writes, deletes):
     """Normal commit: validate revisions → WAL → apply writes → apply deletes → cleanup."""
 
@@ -523,6 +600,12 @@ def _commit(root, tx, writes, deletes):
         if current != expected:
             return _reject(2, "stale_revision", path=w["path"],
                             expected=expected, actual=current)
+
+    # Phase 1.5: IMPLEMENT-mode mechanical gate
+    gate_violation = _validate_implement_gate(root, writes)
+    if gate_violation is not None:
+        exit_code, reason, kwargs = gate_violation
+        return _reject(exit_code, reason, **kwargs)
 
     # Phase 1b: dependency cycle detection
     if _depends_on_changed(root, writes):

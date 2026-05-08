@@ -190,6 +190,15 @@ if [ -x "$ROOT/tests/plan_hash_test.sh" ]; then
   fi
 fi
 
+# ── IMPLEMENT-mode gate tests ────────────────────────────────────────
+if [ -x "$ROOT/tests/implement_gate_test.sh" ]; then
+  if "$ROOT/tests/implement_gate_test.sh" >/dev/null 2>&1; then
+    pass "IMPLEMENT-mode gate tests pass"
+  else
+    fail "IMPLEMENT-mode gate tests failed"
+  fi
+fi
+
 # ── state-commit script ──────────────────────────────────────────────
 COMMIT_SCRIPT=$(find "$ROOT/plugins" -name "state-commit" -path "*/scripts/*" -type f 2>/dev/null | head -1)
 if [ -n "$COMMIT_SCRIPT" ] && [ -x "$COMMIT_SCRIPT" ]; then
