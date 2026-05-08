@@ -1,0 +1,21 @@
+## Decisions Made
+- Adopted the plan's explicit skill/script/reference whitelists in tests/all.sh so structural drift is caught immediately.
+- Kept EXPECTED_SCRIPTS as a separate block (parallel to skills) rather than folding into a generic loop, matching the plan I1 template verbatim.
+
+## Problems Encountered
+- None.
+
+## Constraints Identified
+- None.
+
+## Open Questions
+- None.
+
+## Context
+Phase I1 of the plan/execute migration: tests/all.sh previously listed the legacy 10-skill set and lacked any check for the new scripts/* mechanical commands. After ae0795d removed obsolete skill directories, the structural test diverged from reality. This commit re-anchors all.sh to the post-migration layout.
+
+## Recorded Decisions
+- None.
+
+## Vault Entries Referenced
+- None.
