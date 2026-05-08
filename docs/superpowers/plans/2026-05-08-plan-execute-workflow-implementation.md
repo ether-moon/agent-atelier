@@ -674,11 +674,11 @@ TMP1=$(mktemp -d); cd "$TMP1"; git init -q
 python3 -c "import json; d=json.load(open('$TMP1/.agent-atelier/loop-state.json')); assert 'plan_approval' in d and 'active_plan_cycle_id' in d and 'plan_gate' in d" 2>/dev/null && \
   pass "loop-state has new plan_* fields" || fail "loop-state missing plan_* fields"
 
-# Test 2: idempotent re-run
+# Test 2: idempotent re-run preserves existing values
 "$ROOT/plugins/agent-atelier/scripts/init-helpers.sh" --root "$TMP1" >/dev/null 2>&1
-echo '{"revision":1,"items":[]}' > "$TMP1/.agent-atelier/work-items.json"  # tamper to detect overwrite
+echo '{"revision":1,"updated_at":"2026-01-01T00:00:00Z","items":[{"id":"WI-CUSTOM"}]}' > "$TMP1/.agent-atelier/work-items.json"  # all top-level keys present, custom marker
 "$ROOT/plugins/agent-atelier/scripts/init-helpers.sh" --root "$TMP1" >/dev/null 2>&1
-python3 -c "import json; d=json.load(open('$TMP1/.agent-atelier/work-items.json')); assert d.get('revision') == 1 and 'updated_at' not in d" 2>/dev/null && \
+python3 -c "import json; d=json.load(open('$TMP1/.agent-atelier/work-items.json')); assert d.get('revision') == 1 and d.get('updated_at') == '2026-01-01T00:00:00Z' and d['items'][0].get('id') == 'WI-CUSTOM'" 2>/dev/null && \
   pass "re-run does not overwrite existing values" || fail "re-run overwrote existing values"
 
 # Test 3: migration of legacy state file (missing plan_* fields)
