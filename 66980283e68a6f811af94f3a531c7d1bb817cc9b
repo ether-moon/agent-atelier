@@ -1,0 +1,21 @@
+## Decisions Made
+- Added clarifying-question.schema.json defining the ClarifyingQuestion message format used by PM/Architect for ping-pong questions
+- Added plan-conversation-entry.schema.json defining a single JSONL line in plan-conversations/<cycle-id>.jsonl
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Tasks A2 and A3 of Phase A. Created two JSON Schemas (draft-07) verbatim from the spec section "스키마 정의". Both files validate as JSON; semantic correctness is enforced by consumers downstream.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
