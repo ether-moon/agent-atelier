@@ -1,0 +1,444 @@
+#!/usr/bin/env python3
+"""
+candidate — Candidate set lifecycle.
+
+Subcommands:
+  enqueue <WI-ID>... --branch <name> --commit <sha>
+                                     Append a candidate set to candidate_queue.
+                                     All WIs must be implementing.
+  activate                           Pop FIFO head into active_candidate_set.
+  clear --reason <completed|demoted> Clear active set after success/failure.
+
+Mutating commands emit `native_task_sync` hints (status flips for the
+WIs in the set).
+
+Exit codes:
+  0 success
+  1 invalid input
+  2 stale revision / precondition
+  3 not found
+  4 IO / runtime
+"""
+
+import argparse
+import datetime
+import json
+import os
+import subprocess
+import sys
+
+
+WI_STATUS_TO_NATIVE = {
+    "pending": "pending",
+    "ready": "pending",
+    "blocked_on_human_gate": "pending",
+    "implementing": "in_progress",
+    "candidate_queued": "in_progress",
+    "candidate_validating": "in_progress",
+    "reviewing": "in_progress",
+    "done": "completed",
+}
+
+
+def _now_z():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _err(code, msg, **extra):
+    payload = {"accepted": False, "error": msg}
+    payload.update(extra)
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    sys.exit(code)
+
+
+def resolve_root():
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        return os.path.realpath(out)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return os.path.realpath(os.getcwd())
+
+
+def state_commit_path():
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)), "state-commit")
+
+
+def read_json(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def run_state_commit(root, tx):
+    res = subprocess.run(
+        [state_commit_path(), "--root", root],
+        input=json.dumps(tx),
+        capture_output=True, text=True,
+    )
+    try:
+        sc_out = json.loads(res.stdout) if res.stdout else {}
+    except json.JSONDecodeError:
+        _err(4, "state_commit_unparseable_output", stdout=res.stdout, stderr=res.stderr)
+    if res.returncode != 0:
+        reason = sc_out.get("reason", "state_commit_failed")
+        if reason == "stale_revision":
+            print(json.dumps({"accepted": False, "error": "stale_revision",
+                              "expected": sc_out.get("expected"),
+                              "actual": sc_out.get("actual")},
+                             indent=2, ensure_ascii=False))
+            sys.exit(2)
+        _err(4 if res.returncode >= 4 else res.returncode, reason, detail=sc_out)
+    return sc_out
+
+
+def next_cs_id(loop_state):
+    nums = []
+    acs = loop_state.get("active_candidate_set")
+    if acs and acs.get("id", "").startswith("CS-"):
+        try:
+            nums.append(int(acs["id"].split("-")[1]))
+        except (ValueError, IndexError):
+            pass
+    for entry in (loop_state.get("candidate_queue") or []):
+        cid = entry.get("id", "")
+        if cid.startswith("CS-"):
+            try:
+                nums.append(int(cid.split("-")[1]))
+            except (ValueError, IndexError):
+                pass
+    nxt = (max(nums) + 1) if nums else 1
+    return f"CS-{nxt:03d}"
+
+
+def build_native_sync(wi_ids, new_wi_status):
+    return {
+        "action": "update",
+        "targets": [
+            {
+                "subject_prefix": f"{wid}:",
+                "new_status": WI_STATUS_TO_NATIVE.get(new_wi_status, "pending"),
+                "metadata": {"work_item_id": wid, "wi_status": new_wi_status},
+            }
+            for wid in wi_ids
+        ],
+    }
+
+
+# ── enqueue ────────────────────────────────────────────────────────────
+def cmd_enqueue(root, args):
+    if not args.branch or not args.commit:
+        _err(1, "missing_branch_or_commit")
+
+    wi_ids = []
+    for arg in args.wi_ids:
+        for wid in arg.split(","):
+            wid = wid.strip()
+            if wid:
+                wi_ids.append(wid)
+    if not wi_ids:
+        _err(1, "missing_wi_ids")
+
+    wi_path = os.path.join(root, ".agent-atelier", "work-items.json")
+    loop_path = os.path.join(root, ".agent-atelier", "loop-state.json")
+    wi_store = read_json(wi_path)
+    loop_state = read_json(loop_path)
+
+    items = list(wi_store.get("items", []))
+    found = {it.get("id"): (i, it) for i, it in enumerate(items)}
+    missing = [wid for wid in wi_ids if wid not in found]
+    if missing:
+        _err(3, "work_items_not_found", missing=missing)
+
+    # Check all are implementing
+    wrong = []
+    for wid in wi_ids:
+        i, it = found[wid]
+        if it.get("status") != "implementing":
+            wrong.append({"id": wid, "status": it.get("status")})
+    if wrong:
+        _err(2, "wi_not_implementing", wrong=wrong)
+
+    # Check none already in queue or active set
+    acs = loop_state.get("active_candidate_set")
+    if acs:
+        active_ids = set(acs.get("work_item_ids", []))
+        overlap = active_ids & set(wi_ids)
+        if overlap:
+            _err(2, "wi_in_active_set", overlap=sorted(overlap))
+    queue = list(loop_state.get("candidate_queue") or [])
+    for entry in queue:
+        overlap = set(entry.get("work_item_ids", [])) & set(wi_ids)
+        if overlap:
+            _err(2, "wi_already_queued", overlap=sorted(overlap),
+                 candidate_set_id=entry.get("id"))
+
+    cs_id = next_cs_id(loop_state)
+    cs_type = "single" if len(wi_ids) == 1 else "batch"
+
+    now = _now_z()
+    # Update WIs
+    for wid in wi_ids:
+        i, it = found[wid]
+        new_it = dict(it)
+        new_it["status"] = "candidate_queued"
+        promotion = dict(new_it.get("promotion") or {})
+        promotion["candidate_branch"] = args.branch
+        promotion["candidate_commit"] = args.commit
+        promotion["status"] = "queued"
+        new_it["promotion"] = promotion
+        new_it["owner_session_id"] = None
+        new_it["last_heartbeat_at"] = None
+        new_it["lease_expires_at"] = None
+        new_it["revision"] = it.get("revision", 0) + 1
+        items[i] = new_it
+
+    new_entry = {
+        "id": cs_id,
+        "work_item_ids": wi_ids,
+        "branch": args.branch,
+        "commit": args.commit,
+        "type": cs_type,
+        "activated_at": None,
+    }
+    queue.append(new_entry)
+
+    new_wi_store = {
+        "revision": wi_store.get("revision", 0) + 1,
+        "updated_at": now,
+        "items": items,
+    }
+    new_loop = dict(loop_state)
+    new_loop["candidate_queue"] = queue
+    new_loop["revision"] = loop_state.get("revision", 0) + 1
+    new_loop["updated_at"] = now
+
+    tx = {"writes": [
+        {"path": ".agent-atelier/work-items.json",
+         "expected_revision": wi_store.get("revision"), "content": new_wi_store},
+        {"path": ".agent-atelier/loop-state.json",
+         "expected_revision": loop_state.get("revision"), "content": new_loop},
+    ]}
+    run_state_commit(root, tx)
+
+    output = {
+        "accepted": True,
+        "committed_revision": new_wi_store["revision"],
+        "changed": True,
+        "candidate_set_id": cs_id,
+        "type": cs_type,
+        "work_item_ids": wi_ids,
+        "artifacts": [".agent-atelier/work-items.json", ".agent-atelier/loop-state.json"],
+        "native_task_sync": build_native_sync(wi_ids, "candidate_queued"),
+    }
+    print(json.dumps(output, indent=2, ensure_ascii=False))
+
+
+# ── activate ───────────────────────────────────────────────────────────
+def cmd_activate(root, _args):
+    wi_path = os.path.join(root, ".agent-atelier", "work-items.json")
+    loop_path = os.path.join(root, ".agent-atelier", "loop-state.json")
+    wi_store = read_json(wi_path)
+    loop_state = read_json(loop_path)
+
+    if loop_state.get("active_candidate_set") is not None:
+        _err(2, "slot_occupied",
+             active=loop_state.get("active_candidate_set", {}).get("id"))
+    queue = list(loop_state.get("candidate_queue") or [])
+    if not queue:
+        _err(2, "queue_empty")
+
+    head = dict(queue.pop(0))
+    head["activated_at"] = _now_z()
+    wi_ids = head.get("work_item_ids", [])
+
+    items = list(wi_store.get("items", []))
+    found = {it.get("id"): (i, it) for i, it in enumerate(items)}
+    missing = [wid for wid in wi_ids if wid not in found]
+    if missing:
+        _err(3, "work_items_not_found", missing=missing)
+
+    now = _now_z()
+    for wid in wi_ids:
+        i, it = found[wid]
+        new_it = dict(it)
+        new_it["status"] = "candidate_validating"
+        promotion = dict(new_it.get("promotion") or {})
+        promotion["status"] = "validating"
+        new_it["promotion"] = promotion
+        new_it["revision"] = it.get("revision", 0) + 1
+        items[i] = new_it
+
+    new_wi_store = {
+        "revision": wi_store.get("revision", 0) + 1,
+        "updated_at": now,
+        "items": items,
+    }
+    new_loop = dict(loop_state)
+    new_loop["active_candidate_set"] = head
+    new_loop["candidate_queue"] = queue
+    new_loop["revision"] = loop_state.get("revision", 0) + 1
+    new_loop["updated_at"] = now
+
+    tx = {"writes": [
+        {"path": ".agent-atelier/work-items.json",
+         "expected_revision": wi_store.get("revision"), "content": new_wi_store},
+        {"path": ".agent-atelier/loop-state.json",
+         "expected_revision": loop_state.get("revision"), "content": new_loop},
+    ]}
+    run_state_commit(root, tx)
+
+    output = {
+        "accepted": True,
+        "committed_revision": new_wi_store["revision"],
+        "changed": True,
+        "candidate_set_id": head.get("id"),
+        "work_item_ids": wi_ids,
+        "artifacts": [".agent-atelier/work-items.json", ".agent-atelier/loop-state.json"],
+        "native_task_sync": build_native_sync(wi_ids, "candidate_validating"),
+    }
+    print(json.dumps(output, indent=2, ensure_ascii=False))
+
+
+# ── clear ──────────────────────────────────────────────────────────────
+def cmd_clear(root, args):
+    reason = args.reason or "demoted"
+    wi_path = os.path.join(root, ".agent-atelier", "work-items.json")
+    loop_path = os.path.join(root, ".agent-atelier", "loop-state.json")
+    wi_store = read_json(wi_path)
+    loop_state = read_json(loop_path)
+
+    acs = loop_state.get("active_candidate_set")
+    if not acs:
+        _err(2, "no_active_set")
+
+    wi_ids = acs.get("work_item_ids", [])
+    items = list(wi_store.get("items", []))
+    found = {it.get("id"): (i, it) for i, it in enumerate(items)}
+    missing = [wid for wid in wi_ids if wid not in found]
+    if missing:
+        _err(3, "work_items_not_found", missing=missing)
+
+    now = _now_z()
+    new_loop = dict(loop_state)
+    new_loop["active_candidate_set"] = None
+    new_loop["revision"] = loop_state.get("revision", 0) + 1
+    new_loop["updated_at"] = now
+
+    artifacts = [".agent-atelier/loop-state.json"]
+    writes = []
+
+    if reason == "completed":
+        # Verify all WIs are done
+        not_done = [wid for wid in wi_ids
+                    if found[wid][1].get("status") != "done"]
+        if not_done:
+            _err(2, "wi_not_done", not_done=not_done)
+        # No work-items.json change needed
+        writes.append({
+            "path": ".agent-atelier/loop-state.json",
+            "expected_revision": loop_state.get("revision"),
+            "content": new_loop,
+        })
+        new_status = "done"
+
+    elif reason == "demoted":
+        # Idempotency guard: if all WIs are already ready with cleared promotion,
+        # only clear the loop slot
+        all_already_ready = all(
+            found[wid][1].get("status") == "ready"
+            and (found[wid][1].get("promotion") or {}).get("candidate_branch") is None
+            and (found[wid][1].get("promotion") or {}).get("candidate_commit") is None
+            and (found[wid][1].get("promotion") or {}).get("status") == "not_ready"
+            for wid in wi_ids
+        )
+        if all_already_ready:
+            writes.append({
+                "path": ".agent-atelier/loop-state.json",
+                "expected_revision": loop_state.get("revision"),
+                "content": new_loop,
+            })
+        else:
+            for wid in wi_ids:
+                i, it = found[wid]
+                new_it = dict(it)
+                new_it["status"] = "ready"
+                promotion = dict(new_it.get("promotion") or {})
+                promotion["candidate_branch"] = None
+                promotion["candidate_commit"] = None
+                promotion["status"] = "not_ready"
+                new_it["promotion"] = promotion
+                new_it["revision"] = it.get("revision", 0) + 1
+                items[i] = new_it
+
+            new_wi_store = {
+                "revision": wi_store.get("revision", 0) + 1,
+                "updated_at": now,
+                "items": items,
+            }
+            writes.append({
+                "path": ".agent-atelier/work-items.json",
+                "expected_revision": wi_store.get("revision"),
+                "content": new_wi_store,
+            })
+            writes.append({
+                "path": ".agent-atelier/loop-state.json",
+                "expected_revision": loop_state.get("revision"),
+                "content": new_loop,
+            })
+            artifacts.insert(0, ".agent-atelier/work-items.json")
+        new_status = "ready"
+    else:
+        _err(1, "invalid_reason", reason=reason,
+             valid=["completed", "demoted"])
+
+    run_state_commit(root, {"writes": writes})
+
+    output = {
+        "accepted": True,
+        "committed_revision": new_loop["revision"],
+        "changed": True,
+        "candidate_set_id": acs.get("id"),
+        "reason": reason,
+        "work_item_ids": wi_ids,
+        "artifacts": artifacts,
+        "native_task_sync": build_native_sync(wi_ids, new_status),
+    }
+    print(json.dumps(output, indent=2, ensure_ascii=False))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_enq = sub.add_parser("enqueue")
+    p_enq.add_argument("wi_ids", nargs="+",
+                       help="WI IDs (space- or comma-separated)")
+    p_enq.add_argument("--branch", required=True)
+    p_enq.add_argument("--commit", required=True)
+
+    sub.add_parser("activate")
+
+    p_clr = sub.add_parser("clear")
+    p_clr.add_argument("--reason", default="demoted",
+                       choices=["completed", "demoted"])
+
+    args = parser.parse_args()
+    root = resolve_root()
+    try:
+        if args.cmd == "enqueue":
+            cmd_enqueue(root, args)
+        elif args.cmd == "activate":
+            cmd_activate(root, args)
+        elif args.cmd == "clear":
+            cmd_clear(root, args)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        _err(4, "runtime_error", detail=str(exc))
+
+
+if __name__ == "__main__":
+    main()
