@@ -1,0 +1,24 @@
+## Decisions Made
+- environment_error short-circuits before Phase 2: manifest written, but no native_task_sync, no committed_revision. Caller decides next steps (per SKILL.md).
+- Used `set(...)` comparison for work_item_ids match against active set so order doesn't matter; the active_candidate_set field is treated as canonical for the WI roster.
+- Added a fallback in script_contracts.sh to check `targets[]` shape rather than the per-WI shape (validate, like candidate, emits multi-target hints).
+
+## Problems Encountered
+- The first run of script_contracts.sh failed validate's assertion because the test assumed the single-WI hint shape (subject_prefix at top level). Fixed by switching the assertion to drill into targets[0].
+
+## Constraints Identified
+- Validator must NOT decide WI status — manifest.status is the sole signal. The script only mechanically maps the three valid statuses to state changes.
+
+## Open Questions
+- None
+
+## Context
+Sixth and final mechanical script port. tests/script_contracts.sh now
+passes all 24 smoke checks (init-helpers + 6 scripts + per-script ops).
+C8 will wire the harness into tests/all.sh.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
