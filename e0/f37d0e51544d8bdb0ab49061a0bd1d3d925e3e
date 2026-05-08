@@ -1,0 +1,25 @@
+## Decisions Made
+- Port wi skill to a Python script that emits native_task_sync stdout hint instead of calling TaskCreate/TaskUpdate directly (per spec Native Task Sync 패턴).
+- Keep status mapping table (WI_STATUS_TO_NATIVE) inside the script rather than importing from a shared module — the table is small and stable.
+- The harness checks existence for ALL expected scripts up front; per-script blocks gate on `[ -x ]` so partial commits surface clear FAIL lines for missing scripts and PASS lines for completed ones.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- Scripts cannot call TaskCreate/TaskUpdate (LLM-only); they emit hints. The Orchestrator/State Manager executes them after parsing stdout.
+- depends_on immutability must be enforced on upsert (rule 8 in wi-schema.md).
+
+## Open Questions
+- None
+
+## Context
+First of 6 mechanical script ports for the plan/execute workflow refactor.
+The aggregate tests/script_contracts.sh harness is created here in skeleton
+form and extended by C3-C7 commits, with tests/all.sh wiring deferred to C8.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
