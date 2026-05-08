@@ -610,46 +610,54 @@ docs/engineering/
 ```text
 plugins/agent-atelier/
 ├── skills/
-│   ├── init/SKILL.md              # Bootstrap orchestration workspace
-│   ├── status/SKILL.md            # Orchestration dashboard
-│   ├── wi/SKILL.md                # Work item planning (list/show/upsert)
-│   ├── execute/SKILL.md           # Execution lifecycle (claim/heartbeat/complete/requeue/attempt)
-│   ├── candidate/SKILL.md         # Candidate pipeline (enqueue/activate/clear)
-│   ├── validate/SKILL.md          # Validation evidence recording
-│   ├── gate/SKILL.md              # Human decision gates (list/open/resolve)
-│   ├── watchdog/SKILL.md          # Health check & mechanical recovery
-│   └── run/SKILL.md               # Orchestration loop entry point (team spawn & lifecycle)
+│   ├── plan/SKILL.md              # User-facing: DISCOVER → BUILD_PLAN with ping-pong + approval gate
+│   ├── execute/SKILL.md           # User-facing: plan-cycle gate then IMPLEMENT → VALIDATE → REVIEW → DONE
+│   ├── status/SKILL.md            # User-facing: orchestration dashboard
+│   └── monitors/SKILL.md          # Internal-by-usage shim invoked by orchestrator/cron
+├── scripts/                        # Mechanical commands invoked by orchestrator and roles
+│   ├── state-commit               # Atomic multi-file writer with WAL and revision checking
+│   ├── init-helpers.sh            # Bootstrap orchestration workspace (formerly init skill)
+│   ├── wi                         # Work item planning (list/show/upsert)
+│   ├── lifecycle                  # Execution lifecycle (claim/heartbeat/requeue/complete/attempt)
+│   ├── candidate                  # Candidate pipeline (enqueue/activate/clear)
+│   ├── validate                   # Validation evidence recording
+│   ├── gate                       # Human decision gates (list/open/resolve)
+│   ├── watchdog                   # Health check & mechanical recovery
+│   ├── _plan_hash.py              # Plan/spec hash helper used by state-commit gate
+│   └── build-vrm-prompt           # Builds VRM evidence input from WI/spec only (information barrier)
 ├── hooks/
-│   ├── hooks.json                 # Hook registrations (UserPromptSubmit, PreToolUse, Stop, SubagentStop)
+│   ├── hooks.json                 # Hook registrations (UserPromptSubmit, PreToolUse, Stop, SubagentStop, TaskCompleted, TaskCreated, TeammateIdle)
 │   ├── on-prompt.sh               # UserPromptSubmit hook (signal collector: open gates, active_candidate_set, pending WAL)
 │   ├── on-pre-tool-use.sh         # Destructive command blocking
 │   ├── on-task-completed.sh       # Minimum evidence validation
 │   └── on-stop.sh                 # Dangling obligation check
-├── scripts/
-│   ├── state-commit               # Atomic multi-file writer with WAL and revision checking
-│   └── build-vrm-prompt           # Builds VRM evidence input from WI/spec only (information barrier)
 ├── schema/
-│   └── vrm-evidence-input.schema.json
+│   ├── vrm-evidence-input.schema.json
+│   ├── clarifying-question.schema.json
+│   └── plan-conversation-entry.schema.json
+├── agents/                         # 7 spawnable subagent definitions
+│   ├── state-manager.md
+│   ├── pm.md
+│   ├── architect.md
+│   ├── builder.md
+│   ├── vrm.md
+│   ├── qa-reviewer.md
+│   └── ux-reviewer.md
 └── references/
     ├── paths.md                   # Canonical path reference
     ├── state-defaults.md          # Default JSON structures + operating budgets
     ├── wi-schema.md               # Work item schema & normalization rules
     ├── recovery-protocol.md       # Cold resume algorithm & test scenarios
     ├── success-metrics-routing.md # Metrics → prioritization/synthesis/gate routing
-    └── prompts/                   # Production role prompts (10 roles)
+    ├── monitor-runtime.md         # Body of the monitors shim (full procedure)
+    └── prompts/                   # Lead-only / shared role prompts
         ├── orchestrator.md
-        ├── state-manager.md
-        ├── pm.md
-        ├── architect.md
-        ├── builder.md
-        ├── vrm.md
-        ├── qa-reviewer.md
-        ├── ux-reviewer.md
+        ├── output-discipline.md
         ├── ui-designer.md
         └── aesthetic-ux-reviewer.md
 ```
 
-`state-commit` is the sole writer for `.agent-atelier/**`, enforcing single-writer guarantees and crash recovery. `build-vrm-prompt` enforces the validation information barrier. The `watchdog` skill performs mechanical recovery directly (not a separate script). All hooks are project-level (Agent Teams ignores per-agent hook configuration).
+`state-commit` is the sole writer for `.agent-atelier/**`, enforcing single-writer guarantees and crash recovery. `build-vrm-prompt` enforces the validation information barrier. The `watchdog` script performs mechanical recovery directly. All hooks are project-level (Agent Teams ignores per-agent hook configuration).
 
 ---
 
@@ -1572,7 +1580,7 @@ In the full architecture, this keeps the always-on core at **4 roles** and adds 
 ### Priority 2 — Full Role Graph Expansion ✓
 
 - [x] Write full role prompts for each agent (expand skeletons in Section 9 with embedded domain knowledge) → `references/prompts/` (10 files)
-- [x] Implement flat Agent Teams configuration (team spawn logic, conditional role lifecycle) → `skills/run/SKILL.md` (TeamCreate → phase-based activation → requestShutdown → TeamDelete)
+- [x] Implement flat Agent Teams configuration (team spawn logic, conditional role lifecycle) → `skills/execute/SKILL.md` (TeamCreate → phase-based activation → requestShutdown → TeamDelete)
 - [x] Implement PM's Explore subagent pattern for codebase investigation → embedded in `references/prompts/pm.md`
 - [x] Expand Section 9 prompts from pilot-grade base prompts to production-grade prompt files if the role set stabilizes → `references/prompts/` are the production prompts
 - [ ] Optionally build custom MCP tooling for State Manager after pilot if `write()`-based coordination proves too noisy — **deferred: pilot evidence required**
