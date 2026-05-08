@@ -103,7 +103,7 @@ The `TeammateIdle` hook (`on-teammate-idle.sh`) automatically detects when a tea
 
 If no work is available for the teammate's role, the hook allows idle (exit 0) and the teammate shuts down gracefully.
 
-**Builder claim flow:** Builder idle -> Orchestrator receives idle notification -> Orchestrator evaluates `work-items.json` for `ready` WIs -> Orchestrator directs SM to call `/agent-atelier:execute claim` -> SM writes state -> Orchestrator dispatches Builder via `SendMessage`. This prevents both phantom claims (Builders self-serving) and idle loops (exit 2 feedback trapping agents).
+**Builder claim flow:** Builder idle -> Orchestrator receives idle notification -> Orchestrator evaluates `work-items.json` for `ready` WIs -> Orchestrator directs SM to call `bash <plugin-root>/scripts/lifecycle claim` -> SM writes state -> Orchestrator dispatches Builder via `SendMessage`. SM then processes the script's `native_task_sync` hint with `TaskUpdate` (single-writer model: script for state files, LLM for tasks). This prevents both phantom claims (Builders self-serving) and idle loops (exit 2 feedback trapping agents).
 
 ## Team Roster Injection
 
@@ -126,10 +126,10 @@ When conditional specialists are spawned (Builder, VRM, reviewers), include the 
 
 After spawning the team, start background monitors for continuous state observation:
 
-1. **Spawn monitors.** Invoke `/agent-atelier:monitors spawn` -- returns a JSON mapping of monitor names to background task IDs (heartbeat, gate, events, divergence).
-2. **Create monitor poll job.** Use `CronCreate` with cron `"*/2 * * * *"` (fires roughly every 2 minutes when idle). The prompt should invoke `/agent-atelier:monitors check` with the task ID mapping and follow the response protocol documented in the monitors skill.
+1. **Spawn monitors.** Invoke `/agent-atelier:monitors spawn` (the `monitors` skill is a thin shim — full procedure in `../../../references/monitor-runtime.md`). Returns a JSON mapping of monitor names to background task IDs (heartbeat, gate, events, divergence).
+2. **Create monitor poll job.** Use `CronCreate` with cron `"*/2 * * * *"` (fires roughly every 2 minutes when idle). The prompt should invoke `/agent-atelier:monitors check` with the task ID mapping and follow the response protocol documented in `references/monitor-runtime.md`. **Cron prompts MUST embed the absolute resolved plugin root and task-id mapping at creation time** — do not leave `<plugin-root>` or `${CLAUDE_PLUGIN_ROOT}` as placeholders, since cron fires in a fresh subprocess where env substitution does not happen.
 3. **Create watchdog recovery job.** Use `CronCreate` with cron `"*/15 * * * *"` (fires roughly every 15 minutes when idle). The prompt should:
-   - invoke `/agent-atelier:watchdog tick`
+   - run `bash <absolute-plugin-root>/scripts/watchdog tick`
    - re-read `loop-state.json` and `work-items.json`
    - run the Orchestrator resume sweep for teammate respawn, work re-dispatch, and early recovery of unreachable owners
    - stay silent if no recovery or dispatch action is needed
@@ -139,11 +139,11 @@ The monitors provide early warning (10-60 second detection) while the watchdog p
 
 ## Startup Resume Sweep
 
-Run once after the core team and monitor infrastructure are restored, before entering the steady-state loop. Required on every `/agent-atelier:run`; on a clean start it should be a no-op.
+Run once after the core team and monitor infrastructure are restored, before entering the steady-state loop. Required on every `/agent-atelier:execute`; on a clean start it should be a no-op.
 
 1. Re-read `loop-state.json` and `work-items.json`.
 2. Apply the same routing rules as the watchdog recovery pulse, with one cold-resume override:
-   - any WI that was already `implementing` when this `/run` invocation began is presumed stranded from the previous runtime
+   - any WI that was already `implementing` when this `/execute` invocation began is presumed stranded from the previous runtime
    - reclaim it immediately through State Manager with reason `cold-resume: owner session unavailable`
    - do not wait for lease expiry
 3. Resume other recoverable work from durable state:
