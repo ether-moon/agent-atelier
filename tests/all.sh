@@ -285,6 +285,19 @@ if [ -x "$ROOT/tests/script_contracts.sh" ]; then
   fi
 fi
 
+# ── Scenario tests ───────────────────────────────────────────────────
+SCENARIO_TESTS="plan_only execute_no_plan execute_with_valid_plan plan_invalidated pingpong_basic pingpong_modify pingpong_assume pingpong_budget cold_resume_pingpong"
+for t in $SCENARIO_TESTS; do
+  test_path="$ROOT/tests/${t}.sh"
+  if [ -x "$test_path" ]; then
+    if "$test_path" >/dev/null 2>&1; then
+      pass "Scenario test '$t' pass"
+    else
+      fail "Scenario test '$t' failed"
+    fi
+  fi
+done
+
 # ── Summary ──────────────────────────────────────────────────────────
 echo ""
 echo "Results: ${PASS} passed, ${FAIL} failed (${SKILL_COUNT} skills found)"
