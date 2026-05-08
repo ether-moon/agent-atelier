@@ -1,0 +1,22 @@
+## Decisions Made
+- Implemented wi_plan_hash by canonicalizing plan-affecting fields (id, title, description, depends_on, owned_paths, verify, complexity, status_class) into sorted, deterministic JSON before SHA-256
+- Implemented spec_hash returning the literal string "null" for missing files (so callers can serialize the value as-is into JSON)
+- TDD: wrote tests/plan_hash_test.sh first; confirmed it failed; implemented the helper; confirmed all 3 tests pass; wired it into tests/all.sh
+
+## Problems Encountered
+- The originally drafted test in the implementation plan named test 1 "ready vs implementing produces same hash" but ready and implementing belong to different status_class buckets per spec. Per user direction, fixed the test to use status='implementing' for both samples and assert that execution-state fields (lease_expires_at, attempt_count) do not change the hash. Helper code unchanged.
+
+## Constraints Identified
+- The plan-shape canonicalization MUST be stable against IMPLEMENT-phase mutations within the same bucket so Builder activity does not invalidate plan_approval
+
+## Open Questions
+- None
+
+## Context
+Task A5 of Phase A. Added the plan-level hash helpers used downstream by state-commit (mode→IMPLEMENT mechanical gate, Phase B) and the wi script. tests/plan_hash_test.sh runs in isolation and is also invoked by tests/all.sh after the schema_validation block. Full bash tests/all.sh passes (61/61).
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
