@@ -1,0 +1,24 @@
+## Decisions Made
+- 9개 시나리오를 state-level integration test로 구현: 실제 LLM-driven plan/execute 동작은 라이브 Claude 세션이 필요해 모의 불가능, 따라서 scripts/* + state-commit 계약 + jsonl 형식 검증으로 한정
+- 9개 시나리오를 단일 commit으로 묶음: 서로 독립적이고 함께 review가 더 효율적, all.sh wiring도 같은 단위 변경
+- Schema validation은 직접 required-fields/enum 체크로 구현: jsonschema 모듈이 환경에 없어 plan-conversation-entry/clarifying-question 검증을 inline python으로 작성
+- pingpong_budget는 spec의 force-false 규칙(seq>25일 때 blocking=false)을 jsonl 데이터 shape 검증으로 표현: orchestrator prompt 행위는 별도, watchdog defaults에 budget=30/warn_at=25 존재 여부도 함께 확인
+
+## Problems Encountered
+- None — init-helpers + state-commit이 의도한 대로 동작했고 9개 테스트가 모두 first-run에서 통과
+
+## Constraints Identified
+- state-level 검증만 가능: prompt-level orchestrator 동작(질문 라우팅, 게이트 진행, 사용자 알림)은 manual smoke test 영역
+- jsonschema 라이브러리 부재: 스키마 enforcement는 inline python으로 required + enum 체크 수준에서만 수행
+
+## Open Questions
+- None
+
+## Context
+Phase I3에서 plan/execute workflow 9개 시나리오 테스트(plan_only, execute_no_plan, execute_with_valid_plan, plan_invalidated, pingpong_basic, pingpong_modify, pingpong_assume, pingpong_budget, cold_resume_pingpong)를 신규 작성하고 tests/all.sh에 SCENARIO_TESTS 블록으로 연결. 전체 스위트 실행 결과 70 passed / 0 failed. 다음 단계는 Task I4(docs/design 업데이트) 또는 finishing-a-development-branch.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
