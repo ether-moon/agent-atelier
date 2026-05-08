@@ -1,0 +1,20 @@
+## Decisions Made
+- C1 Test 2: tamper와 assertion 모두 "기존 값 보존" 의도에 맞게 수정 (재실행 시 동일 모순 trap 방지)
+
+## Problems Encountered
+- Phase C 실행 중 subagent가 발견한 plan Test 2/Test 3 모순
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+plan 본문 정정. 앞서 실행한 subagent가 옵션 1로 정확한 테스트 commit했지만 plan 본문도 함께 정정.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
