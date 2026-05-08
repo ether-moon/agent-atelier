@@ -1,0 +1,26 @@
+## Decisions Made
+- script_contracts.sh stdout is muted in tests/all.sh (>/dev/null 2>&1) to keep aggregate output readable; users run it directly when investigating a failure.
+- The harness was built incrementally across C2-C7 (one smoke block per script) so each per-script commit was self-validating, not deferred to C8.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Closes Phase C of the plan/execute workflow refactor. All 7 mechanical
+scripts (state-commit + init-helpers + wi + lifecycle + gate + watchdog
++ candidate + validate) now exist with executable bits set, JSON output
+contracts, and smoke-test coverage. native_task_sync hints route through
+stdout JSON for the orchestrator to consume; the LLM-only TaskCreate/
+TaskUpdate calls remain orchestrator responsibility.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
