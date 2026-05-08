@@ -1,0 +1,21 @@
+## Decisions Made
+- Replaced /agent-atelier:execute claim reference in agents/builder.md GUARDRAILS with bash ${CLAUDE_PLUGIN_ROOT}/scripts/lifecycle claim. Builder still does not call this directly; the textual reference now matches the new mechanism location.
+- output-discipline.md unchanged: its only slash reference is /agent-atelier:monitors check, which is retained as the monitors shim slash per the spec.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Phase E task E4 of plan-execute workflow implementation. Final cleanup of internal slash references in role prompts. After this commit, the only /agent-atelier: references in role prompts are the user-facing execute slash and the monitors shim slash.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
