@@ -1,0 +1,21 @@
+## Decisions Made
+- Inserted the new "Plan/Execute Workflow" section between "Plan Approval" and "Skill Format" so it sits next to the related Plan Approval prose without disturbing the Knowledge Vault / Memento / Versioning trailer.
+- Updated sync-point examples to the script form (e.g., `scripts/lifecycle claim`) rather than leaving the old `execute claim` shorthand, since the latter is now ambiguous with the new user-facing /execute skill.
+
+## Problems Encountered
+- None.
+
+## Constraints Identified
+- AGENTS.md "Versioning" section is consumed by skill-set:bumping-version; left untouched.
+
+## Open Questions
+- The migration table in plugins/agent-atelier/skills/execute/SKILL.md still embeds /agent-atelier:wi, /agent-atelier:gate, etc. on the left side because that table teaches the reader the old→new mapping. The verification grep flags these. Treating them as intentional documentation rather than stale call sites; flagged in the I-phase report.
+
+## Context
+Phase I5 of the plan/execute migration. AGENTS.md still claimed 9 skills + 10 prompts and listed `state-commit`/`build-vrm-prompt` as the only scripts. This commit syncs it to the post-migration plugin layout and adds the Plan/Execute Workflow blurb so newcomers learn the user-facing surface from the top-level project doc.
+
+## Recorded Decisions
+- None.
+
+## Vault Entries Referenced
+- None.
