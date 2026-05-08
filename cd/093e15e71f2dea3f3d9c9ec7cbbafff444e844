@@ -1,0 +1,21 @@
+## Decisions Made
+- Extracted Subcommands, Output formats, Idempotency, Error handling sections from skills/monitors/SKILL.md and concatenated event-classification.md into the new references/monitor-runtime.md file per Phase D Task D1
+- Used the canonical header from the plan to clarify shim relationship and tool usage
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Phase D refactor: pulling LLM-driven procedural content out of the skills/ directory into references/ so the skill becomes a thin shim. Original SKILL.md and event-classification.md remain unchanged in this commit.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
