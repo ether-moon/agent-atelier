@@ -1,0 +1,22 @@
+## Decisions Made
+- Added OPERATING RULE 11 requiring Architect to surface BUILD_PLAN decomposition uncertainty (granularity, dependencies, complexity) as ClarifyingQuestion sent to Orchestrator via SendMessage. Architect does not call AskUserQuestion directly.
+- Added OPERATING RULE 12 specifying WI proposals go through bash scripts/wi upsert; Orchestrator (not Architect) handles the returned native_task_sync hint as TaskCreate/TaskUpdate.
+- Added OPERATING RULE 13 mandating no_more_questions signal at the end of each BUILD_PLAN round; SPEC_HARDEN requires matching signals from both PM and Architect at the same round number.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Phase E task E3 of plan-execute workflow implementation. Updates Architect role prompt to participate in the planning ping-pong loop and to use the new scripts/ surface for WI proposals while preserving the single-writer / single-user-channel model.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
