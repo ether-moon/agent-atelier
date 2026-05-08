@@ -1,0 +1,23 @@
+## Decisions Made
+- Python을 bash 스크립트 안에 heredoc으로 임베드 (별도 .py 파일 없이): markdown 파싱 + JSON 머지 로직이 bash로 어색하지만 별도 파일을 만들 만큼 복잡하진 않음
+- 마이그레이션은 top-level key 추가만, 기존 값/중첩 필드 절대 미수정: 기존 install의 in-progress 작업을 보호
+- Test 2의 tamper 라인을 수정: 원본 plan code는 work-items.json을 {"revision":1,"items":[]}로 tamper했으나, 마이그레이션 로직(누락 top-level key 추가)과 충돌해서 'updated_at' not in d assertion이 실패함. 사용자 승인하에 tamper를 {"revision":1,"updated_at":"...","items":[{"id":"WI-CUSTOM"}]}로 변경, assertion도 모든 기존 값 보존을 검증하도록 수정. 테스트 의도("re-run does not overwrite existing values")는 유지.
+
+## Problems Encountered
+- Plan C1의 bash 코드와 test 코드가 verbatim으로는 모순됨 (Test 2). 사용자에게 보고 후 옵션 1(tamper에 모든 default 키 포함) 선택해서 해결.
+
+## Constraints Identified
+- state-defaults.md 파싱은 awk가 아닌 Python regex로: bash awk로 JSON 블록 추출 + 머지 로직 구현은 위험
+- 마이그레이션 로직은 top-level만 손댐 (nested 절대 미수정) — Test 3가 이 동작을 검증
+
+## Open Questions
+- None (Plan 문서의 verbatim test 코드는 사용자가 별도 commit에서 fix 예정)
+
+## Context
+init-helpers.sh 작성 완료. 기존 skills/init 부트스트랩 + 마이그레이션 추가. 6개 contract test 통과 (fresh init / idempotent re-run / legacy migration). all.sh에 wired in.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
