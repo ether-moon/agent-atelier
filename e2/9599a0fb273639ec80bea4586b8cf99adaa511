@@ -1,0 +1,22 @@
+## Decisions Made
+- Added new PLAN CYCLE PROTOCOL section before BUILDER WORK ASSIGNMENT documenting ping-pong loop hosting, question batching (max 3/AskUserQuestion), real-time question budget enforcement (warn at 25, halt at 30), JSONL append responsibility, gate presentation logic with 0-WI shortcut, atomic gate-pass transaction format for both /execute and /plan contexts, and modify-feedback routing.
+- Added MUTATING SCRIPT CALLS section right after PLAN CYCLE PROTOCOL: scripts return native_task_sync hints which Orchestrator must execute as TaskCreate/TaskUpdate before returning to its loop.
+- Migrated all internal slash references to bash script invocations (lifecycle, watchdog, candidate, validate). Kept /agent-atelier:execute and /agent-atelier:monitors (shim) as user-facing slashes.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Phase E task E1 of the plan-execute workflow implementation. Updates the orchestrator role prompt to host the planning ping-pong loop with the user (via AskUserQuestion) and to call internal mechanisms via scripts/ rather than slash commands. Adds the MUTATING SCRIPT CALLS contract so native task sync stays in lock-step with work-items.json.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
