@@ -109,7 +109,7 @@ else
 fi
 
 # ── Expected skills exist ────────────────────────────────────────────
-EXPECTED_SKILLS="init status wi execute gate watchdog candidate validate run monitors"
+EXPECTED_SKILLS="plan execute status monitors"
 for skill_name in $EXPECTED_SKILLS; do
   skill_path="$ROOT/plugins/agent-atelier/skills/$skill_name/SKILL.md"
   if [ -f "$skill_path" ]; then
@@ -119,8 +119,22 @@ for skill_name in $EXPECTED_SKILLS; do
   fi
 done
 
+# ── Expected scripts exist and are executable ───────────────────────
+EXPECTED_SCRIPTS="state-commit init-helpers.sh wi gate watchdog candidate validate lifecycle"
+SCRIPTS_DIR="$ROOT/plugins/agent-atelier/scripts"
+SCRIPT_COUNT=0
+for script_name in $EXPECTED_SCRIPTS; do
+  script_path="$SCRIPTS_DIR/$script_name"
+  if [ -f "$script_path" ] && [ -x "$script_path" ]; then
+    pass "script '$script_name' exists and is executable"
+    SCRIPT_COUNT=$((SCRIPT_COUNT + 1))
+  else
+    fail "script '$script_name' not found or not executable at $script_path"
+  fi
+done
+
 # ── Reference files exist ────────────────────────────────────────────
-EXPECTED_REFS="paths.md state-defaults.md wi-schema.md recovery-protocol.md success-metrics-routing.md"
+EXPECTED_REFS="paths.md state-defaults.md wi-schema.md recovery-protocol.md success-metrics-routing.md monitor-runtime.md"
 for ref_name in $EXPECTED_REFS; do
   ref_path="$ROOT/plugins/agent-atelier/references/$ref_name"
   if [ -f "$ref_path" ]; then
