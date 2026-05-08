@@ -1,0 +1,22 @@
+## Decisions Made
+- Removed seven obsolete skill directories (init, run, wi, gate, watchdog, candidate, validate) along with their reference subdirectories.
+- Removed skills/execute/reference/subcommands.md as a stale lifecycle-era artifact superseded by state-machine.md and team-lifecycle.md from the run -> execute move in Phase F2.
+- Kept the migration table inside skills/execute/SKILL.md as documentation of old -> new mappings.
+
+## Problems Encountered
+- git rm -r left empty parent directories on disk because git only tracks files; cleared them with rmdir to satisfy the post-condition `ls plugins/agent-atelier/skills/` returning exactly four entries.
+
+## Constraints Identified
+- The verification grep that asks for zero matches still finds entries in skills/execute/SKILL.md migration table, references/monitor-runtime.md, and the design spec; those are documentation references, not live routing, and remain intentional.
+
+## Open Questions
+- None
+
+## Context
+Phase H1 of the plan/execute simplification: the seven skill surfaces have been collapsed into bash scripts under plugins/agent-atelier/scripts/, and the public slash commands are now plan and execute. After this commit only execute, monitors, plan, and status remain under skills/.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
