@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PlanConversationEntry",
+  "type": "object",
+  "required": ["seq", "ts", "type"],
+  "properties": {
+    "seq": {"type": "integer", "minimum": 1},
+    "ts": {"type": "string", "format": "date-time"},
+    "type": {"enum": [
+      "clarifying_question",
+      "user_response",
+      "artifact_update",
+      "phase_transition",
+      "no_more_questions",
+      "gate_presented",
+      "gate_resolved",
+      "round_marker"
+    ]},
+    "round": {"type": "integer", "minimum": 1},
+    "phase": {"enum": ["DISCOVER", "SPEC_DRAFT", "SPEC_HARDEN", "BUILD_PLAN", "FINAL_REVIEW"]},
+    "from_role": {"enum": ["PM", "Architect", "Orchestrator"]},
+    "payload": {"type": "object"}
+  }
+}
