@@ -9,6 +9,7 @@ All paths are relative to the repository root (detected via `git rev-parse --sho
 | `.agent-atelier/loop-state.json` | Control plane: mode, active candidate, open gates, next action |
 | `.agent-atelier/work-items.json` | Work item store: all WIs with status, lease, promotion |
 | `.agent-atelier/watchdog-jobs.json` | Watchdog thresholds and open alerts |
+| `.agent-atelier/plan-conversations/<cycle-id>.jsonl` | Per-cycle ping-pong conversation log (Orchestrator-only writer) |
 
 ## Human Gates
 
@@ -54,3 +55,19 @@ All paths are relative to the repository root (detected via `git rev-parse --sho
 | `plugins/agent-atelier/scripts/monitors/event-tail.sh` | Semantic event stream tail |
 | `plugins/agent-atelier/scripts/monitors/ci-status.sh` | CI/PR status polling |
 | `plugins/agent-atelier/scripts/monitors/branch-divergence.sh` | Base branch divergence detection |
+
+## Mechanical Scripts (scripts/)
+
+| Path | Purpose |
+|------|---------|
+| `plugins/agent-atelier/scripts/state-commit` | Atomic multi-file writer for `.agent-atelier/**` (sole writer) |
+| `plugins/agent-atelier/scripts/init-helpers.sh` | Bootstrap and migrate state files |
+| `plugins/agent-atelier/scripts/wi` | Work item planning (list/show/upsert) |
+| `plugins/agent-atelier/scripts/lifecycle` | WI execution lifecycle (claim/heartbeat/requeue/complete/attempt) |
+| `plugins/agent-atelier/scripts/gate` | Human gate lifecycle (list/open/resolve) |
+| `plugins/agent-atelier/scripts/watchdog` | Mechanical recovery tick |
+| `plugins/agent-atelier/scripts/candidate` | Candidate set lifecycle (enqueue/activate/clear) |
+| `plugins/agent-atelier/scripts/validate` | Validation evidence recording |
+| `plugins/agent-atelier/scripts/_plan_hash.py` | Plan-level hash helpers (used by state-commit and wi) |
+
+All scripts emit JSON to stdout. Mutating scripts include a `native_task_sync` hint that callers (Orchestrator/SM) must execute as `TaskCreate`/`TaskUpdate` after success. See spec section "Native Task Sync 패턴".
