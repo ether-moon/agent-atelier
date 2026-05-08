@@ -46,7 +46,7 @@ PY
 
 if [[ -n "$DANGLING" ]]; then
   echo "WARNING: Active leases will become stale if you exit: $DANGLING"
-  echo "Consider running '/agent-atelier:execute requeue' first, or the watchdog will recover them on next tick."
+  echo "Consider running 'bash \${CLAUDE_PLUGIN_ROOT}/scripts/lifecycle requeue' first, or the watchdog will recover them on next tick."
   # Warn but don't hard-block — the watchdog will clean up stale leases
 fi
 
@@ -54,7 +54,7 @@ fi
 WAL_FILE="$STATE_DIR/.pending-tx.json"
 if [[ -f "$WAL_FILE" ]]; then
   echo "WARNING: Pending transaction exists at $WAL_FILE"
-  echo "Run '/agent-atelier:init' or '/agent-atelier:watchdog tick' to replay it before exiting."
+  echo "Run 'bash \${CLAUDE_PLUGIN_ROOT}/scripts/init-helpers.sh' or 'bash \${CLAUDE_PLUGIN_ROOT}/scripts/watchdog tick' to replay it before exiting."
 fi
 
 # Check for leaked team resources (Agent Teams cleanup not run)
