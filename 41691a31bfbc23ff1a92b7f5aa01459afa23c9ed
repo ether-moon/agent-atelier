@@ -1,0 +1,21 @@
+## Decisions Made
+- Added three new validation blocks to tests/schema_validation.sh: loop-state plan_* fields, watchdog plan_* defaults, and JSON validity of the two new schema files
+- Used the existing awk/python pattern for extracting JSON blocks from state-defaults.md to keep the test consistent
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Task A4 of Phase A. tests/schema_validation.sh now asserts the presence of plan-related defaults and validates the two new JSON schemas. All 9 assertions pass.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
