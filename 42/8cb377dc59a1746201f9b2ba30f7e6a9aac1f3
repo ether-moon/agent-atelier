@@ -1,0 +1,22 @@
+## Decisions Made
+- Added "Mechanical Scripts (scripts/)" section listing 9 mechanical scripts (state-commit, init-helpers, wi, lifecycle, gate, watchdog, candidate, validate, _plan_hash.py)
+- Added plan-conversations entry to the State Files section to document the per-cycle ping-pong jsonl path
+- Placed the Mechanical Scripts section after Monitor Scripts per plan D2 step 1
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Phase D Task D2: Documenting the script and plan-conversation paths so callers can locate them. References the spec's Native Task Sync section for the JSON contract scripts emit.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
