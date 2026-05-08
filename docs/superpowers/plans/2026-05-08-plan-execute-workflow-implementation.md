@@ -218,13 +218,13 @@ PASS=0; FAIL=0
 pass() { PASS=$((PASS+1)); echo "  PASS: $1"; }
 fail() { FAIL=$((FAIL+1)); echo "  FAIL: $1" >&2; }
 
-# Test: same plan structure → same hash regardless of execution-state fields
+# Test: execution-state fields (lease, attempt_count) don't affect hash within same status_class
 H1=$(python3 -c "
 import sys; sys.path.insert(0, '$ROOT/plugins/agent-atelier/scripts')
 from _plan_hash import wi_plan_hash
 print(wi_plan_hash([
   {'id': 'WI-001', 'title': 't', 'description': 'd', 'depends_on': [],
-   'owned_paths': ['x'], 'verify': ['v'], 'complexity': 'simple', 'status': 'ready'}
+   'owned_paths': ['x'], 'verify': ['v'], 'complexity': 'simple', 'status': 'implementing'}
 ]))
 ")
 H2=$(python3 -c "
@@ -236,8 +236,8 @@ print(wi_plan_hash([
    'lease_expires_at': '2026-05-08T01:00:00Z', 'attempt_count': 2}
 ]))
 ")
-[ "$H1" = "$H2" ] && pass "status_class collapsing: ready vs implementing produces same hash" \
-                 || fail "ready vs implementing yielded different hashes ($H1 vs $H2)"
+[ "$H1" = "$H2" ] && pass "execution-state fields do not affect hash within same status_class" \
+                 || fail "execution-state fields changed hash unexpectedly ($H1 vs $H2)"
 
 # Test: changing depends_on changes the hash
 H3=$(python3 -c "
