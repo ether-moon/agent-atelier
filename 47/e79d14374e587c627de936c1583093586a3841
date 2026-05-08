@@ -1,0 +1,22 @@
+## Decisions Made
+- Added OPERATING RULE 7 requiring PM to surface uncertainty during DISCOVER/SPEC_DRAFT/SPEC_HARDEN as a structured ClarifyingQuestion payload (per schema/clarifying-question.schema.json) sent to Orchestrator via SendMessage. PM never calls AskUserQuestion directly; Orchestrator is the sole user channel and sole JSONL writer.
+- Added OPERATING RULE 8 mandating PM to send no_more_questions signal at the end of each plan-phase round. Phase termination requires this signal (with Architect's matching signal in SPEC_HARDEN).
+- Specified blocking semantics: blocking: true when answer changes spec content; blocking: false when only operational defaults are in question.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Phase E task E2 of plan-execute workflow implementation. Updates PM role prompt so PM produces ClarifyingQuestion payloads instead of silent assumptions during plan cycles, preserving the single-writer model and enabling Orchestrator to host the ping-pong loop.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
