@@ -1,0 +1,24 @@
+## Decisions Made
+- enqueue accepts both space-separated WI IDs (argparse nargs="+") and comma-separated within a single arg, matching the pre-script SKILL.md examples (`WI-014` and `WI-018,WI-019,WI-020`).
+- Used a `targets[]` array within native_task_sync for batch updates rather than emitting one hint per WI; this gives the orchestrator a single hint object to iterate over.
+- clear --reason demoted's idempotency guard checks all four conditions (status=ready, branch null, commit null, promotion.status=not_ready) — if any WI partially demoted, the work-items.json write happens to ensure consistency.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- enqueue must reject overlapping WI sets across both active_candidate_set and candidate_queue entries to prevent fate-sharing violations.
+
+## Open Questions
+- None
+
+## Context
+Fifth of 6 mechanical script ports. The native_task_sync hint shape
+diverges slightly from per-WI scripts (uses `targets[]` instead of a
+single subject_prefix) because candidate ops are inherently multi-WI.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
