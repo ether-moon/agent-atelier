@@ -1,0 +1,24 @@
+## Decisions Made
+- Plan State section is always rendered (even when fields are null) so users see at a glance whether to plan, resume, or execute.
+- Hash-match check uses the same _plan_hash.py module that state-commit and execute use (single source of truth for hash equality).
+- Recent ping-pong activity = last 3 lines of the active cycle's jsonl, summarized inline.
+- /agent-atelier:init slash references replaced with `bash ${CLAUDE_PLUGIN_ROOT}/scripts/init-helpers.sh` (or pointers to /plan and /execute which auto-init).
+
+## Problems Encountered
+- None.
+
+## Constraints Identified
+- plan_state output JSON includes hash_match booleans so callers (e.g., scripts) can detect invalidation programmatically.
+- Stale plan-gate detection (>24h) surfaces visually as "!! PLAN GATE STALE" — watchdog also emits cross-session alerts but the dashboard surfaces it inline.
+
+## Open Questions
+- None.
+
+## Context
+F4 task of Phase F: status dashboard now surfaces plan_approval, active plan cycle, plan_gate, and the most recent ping-pong activity. Init slash references migrated. Frontmatter updated to advertise plan-state surfacing in trigger description.
+
+## Recorded Decisions
+- None.
+
+## Vault Entries Referenced
+- None.
