@@ -1,0 +1,465 @@
+#!/usr/bin/env python3
+"""
+watchdog — Mechanical recovery + alerts (no LLM judgment).
+
+Subcommand:
+  tick    Run the full health-check sweep:
+          - WAL replay if .pending-tx.json exists
+          - stale lease recovery (implementing past lease_expires_at)
+          - stale review recovery (reviewing past review_timeout_minutes)
+          - stale candidate recovery (active set past candidate_timeout_minutes)
+          - long-open gate warnings
+          - repeated failure flags
+          - operating budget enforcement (alerts only, no auto-cancel)
+
+Output JSON to stdout:
+  {"actions": [...], "alerts": [...], "auto_transitioned": [wi_ids],
+   "committed_revision": N, "tick_at": "..."}
+
+NOTE: watchdog does NOT emit `native_task_sync` hints. The Orchestrator
+processes the `actions[]` list and runs TaskUpdate as needed.
+
+Exit codes:
+  0 success
+  1 usage error
+  2 stale revision (after retries)
+  3 state files not found
+  4 IO / runtime
+"""
+
+import argparse
+import datetime
+import glob
+import json
+import os
+import subprocess
+import sys
+
+
+def _now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _now_z():
+    return _now().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_z(s):
+    if not s:
+        return None
+    try:
+        # Strip trailing Z and parse as UTC
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def _err(code, msg, **extra):
+    payload = {"accepted": False, "error": msg}
+    payload.update(extra)
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    sys.exit(code)
+
+
+def resolve_root():
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        return os.path.realpath(out)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return os.path.realpath(os.getcwd())
+
+
+def state_commit_path():
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)), "state-commit")
+
+
+def read_json(path):
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def hdr_files(root, state):
+    folder = os.path.join(root, ".agent-atelier", "human-gates", state)
+    return sorted(glob.glob(os.path.join(folder, "HDR-*.json")))
+
+
+def next_alert_id(existing):
+    nums = []
+    for a in existing or []:
+        aid = a.get("id", "")
+        if aid.startswith("WDA-"):
+            try:
+                nums.append(int(aid.split("-")[1]))
+            except (ValueError, IndexError):
+                pass
+    nxt = (max(nums) + 1) if nums else 1
+    return f"WDA-{nxt:03d}"
+
+
+def cmd_tick(root, _args):
+    state_dir = os.path.join(root, ".agent-atelier")
+    wi_path = os.path.join(state_dir, "work-items.json")
+    loop_path = os.path.join(state_dir, "loop-state.json")
+    wd_path = os.path.join(state_dir, "watchdog-jobs.json")
+
+    if not (os.path.exists(wi_path) and os.path.exists(loop_path) and os.path.exists(wd_path)):
+        _err(3, "state_files_missing")
+
+    # WAL replay first
+    wal = os.path.join(state_dir, ".pending-tx.json")
+    if os.path.exists(wal):
+        subprocess.run([state_commit_path(), "--root", root, "--replay"],
+                       capture_output=True, text=True)
+
+    wi_store = read_json(wi_path)
+    loop_state = read_json(loop_path)
+    wd_store = read_json(wd_path)
+
+    defaults = wd_store.get("defaults", {})
+    impl_timeout = defaults.get("implementing_timeout_minutes", 90)
+    review_timeout = defaults.get("review_timeout_minutes", 30)
+    candidate_timeout = defaults.get("candidate_timeout_minutes", 30)
+    gate_warn_hours = defaults.get("gate_warn_after_hours", 24)
+    budgets = wd_store.get("budgets", {})
+
+    now = _now()
+    now_z = _now_z()
+    actions = []
+    alerts_new = []
+    auto_transitioned = []
+
+    items = list(wi_store.get("items", []))
+    items_changed = False
+
+    # Stale lease recovery
+    for i, it in enumerate(items):
+        if it.get("status") != "implementing":
+            continue
+        lease = parse_z(it.get("lease_expires_at"))
+        if lease is None:
+            continue
+        if lease < now:
+            new_it = dict(it)
+            new_it["status"] = "ready"
+            new_it["owner_session_id"] = None
+            new_it["last_heartbeat_at"] = None
+            new_it["lease_expires_at"] = None
+            new_it["stale_requeue_count"] = it.get("stale_requeue_count", 0) + 1
+            new_it["last_requeue_reason"] = "watchdog: lease expired"
+            new_it["revision"] = it.get("revision", 0) + 1
+            items[i] = new_it
+            items_changed = True
+            actions.append({
+                "type": "stale_lease_requeued",
+                "work_item_id": it.get("id"),
+                "previous_status": "implementing",
+                "new_status": "ready",
+                "lease_expired_at": it.get("lease_expires_at"),
+            })
+            auto_transitioned.append(it.get("id"))
+
+    # Stale review recovery
+    for i, it in enumerate(items):
+        if it.get("status") != "reviewing":
+            continue
+        # Use last_heartbeat_at as the review-start proxy
+        ts = parse_z(it.get("last_heartbeat_at")) or parse_z(it.get("lease_expires_at"))
+        if ts is None:
+            continue
+        elapsed = (now - ts).total_seconds() / 60.0
+        if elapsed > review_timeout:
+            new_it = dict(it)
+            new_it["status"] = "ready"
+            new_it["last_requeue_reason"] = "watchdog: review timeout"
+            new_it["stale_requeue_count"] = it.get("stale_requeue_count", 0) + 1
+            new_it["revision"] = it.get("revision", 0) + 1
+            items[i] = new_it
+            items_changed = True
+            actions.append({
+                "type": "stale_review_requeued",
+                "work_item_id": it.get("id"),
+                "elapsed_minutes": round(elapsed, 1),
+            })
+            auto_transitioned.append(it.get("id"))
+
+    # Stale candidate recovery
+    new_loop = dict(loop_state)
+    loop_changed = False
+    acs = loop_state.get("active_candidate_set")
+    if acs:
+        activated_at = parse_z(acs.get("activated_at"))
+        if activated_at is None:
+            # fallback: most recent last_heartbeat_at among referenced WIs
+            wi_ids = acs.get("work_item_ids", [])
+            ts_candidates = []
+            for it in items:
+                if it.get("id") in wi_ids:
+                    t = parse_z(it.get("last_heartbeat_at"))
+                    if t:
+                        ts_candidates.append(t)
+            activated_at = max(ts_candidates) if ts_candidates else None
+
+        if activated_at and (now - activated_at).total_seconds() / 60.0 > candidate_timeout:
+            for i, it in enumerate(items):
+                if it.get("id") in (acs.get("work_item_ids") or []):
+                    new_it = dict(it)
+                    new_it["status"] = "ready"
+                    promotion = dict(new_it.get("promotion") or {})
+                    promotion["candidate_branch"] = None
+                    promotion["candidate_commit"] = None
+                    promotion["status"] = "not_ready"
+                    new_it["promotion"] = promotion
+                    new_it["revision"] = it.get("revision", 0) + 1
+                    items[i] = new_it
+                    auto_transitioned.append(it.get("id"))
+            new_loop["active_candidate_set"] = None
+
+            # Auto-promote next from queue (FIFO) if non-empty
+            queue = list(loop_state.get("candidate_queue") or [])
+            if queue:
+                next_set = queue.pop(0)
+                next_set = dict(next_set)
+                next_set["activated_at"] = now_z
+                new_loop["active_candidate_set"] = next_set
+                new_loop["candidate_queue"] = queue
+                # Transition newly-active set's WIs to candidate_validating
+                for i, it in enumerate(items):
+                    if it.get("id") in (next_set.get("work_item_ids") or []):
+                        new_it = dict(it)
+                        new_it["status"] = "candidate_validating"
+                        promotion = dict(new_it.get("promotion") or {})
+                        promotion["status"] = "validating"
+                        new_it["promotion"] = promotion
+                        new_it["revision"] = it.get("revision", 0) + 1
+                        items[i] = new_it
+            else:
+                new_loop["candidate_queue"] = list(loop_state.get("candidate_queue") or [])
+
+            loop_changed = True
+            items_changed = True
+            actions.append({
+                "type": "stale_candidate_demoted",
+                "candidate_set_id": acs.get("id"),
+                "work_item_ids": acs.get("work_item_ids"),
+            })
+
+    # Long-open gate warnings
+    open_alerts = list(wd_store.get("open_alerts") or [])
+    for path in hdr_files(root, "open"):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                hdr = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            continue
+        created = parse_z(hdr.get("created_at"))
+        if created is None:
+            continue
+        age_hours = (now - created).total_seconds() / 3600.0
+        if age_hours > gate_warn_hours:
+            # Avoid duplicate alerts for the same gate
+            already = any(a.get("type") == "long_open_gate"
+                          and a.get("gate_id") == hdr.get("id")
+                          for a in open_alerts)
+            if already:
+                continue
+            alert = {
+                "id": next_alert_id(open_alerts + alerts_new),
+                "created_at": now_z,
+                "type": "long_open_gate",
+                "gate_id": hdr.get("id"),
+                "message": f"Gate {hdr.get('id')} open for {age_hours:.0f}h",
+                "action_taken": "none",
+            }
+            alerts_new.append(alert)
+
+    # Repeated failure flags
+    escalations = []
+    for it in items:
+        # Same finding fingerprint 3+ times — represented by attempt_count if no
+        # cleaner counter exists. We'll use stale_requeue_count for now.
+        if it.get("stale_requeue_count", 0) >= 3:
+            escalations.append({
+                "work_item_id": it.get("id"),
+                "reason": f"stale_requeue_count={it['stale_requeue_count']}",
+            })
+
+    # Operating budget enforcement (alerts, not enforcement)
+    max_wall = budgets.get("max_wall_clock_minutes_per_wi", 480)
+    max_handoffs = budgets.get("max_handoffs_per_wi", 6)
+    max_interventions = budgets.get("max_watchdog_interventions_per_wi", 3)
+    max_attempts = budgets.get("max_attempts_per_wi", 5)
+
+    for it in items:
+        if it.get("status") == "done":
+            continue
+        wi_id = it.get("id")
+
+        first = parse_z(it.get("first_claimed_at"))
+        if first:
+            wall_min = (now - first).total_seconds() / 60.0
+            if wall_min > max_wall:
+                already = any(a.get("type") == "budget_exceeded"
+                              and a.get("work_item_id") == wi_id
+                              and "wall_clock" in (a.get("budget") or "")
+                              for a in open_alerts + alerts_new)
+                if not already:
+                    alerts_new.append({
+                        "id": next_alert_id(open_alerts + alerts_new),
+                        "created_at": now_z,
+                        "type": "budget_exceeded",
+                        "work_item_id": wi_id,
+                        "budget": "wall_clock",
+                        "message": f"WI {wi_id} wall_clock={wall_min:.0f}min > {max_wall}",
+                        "action_taken": "none",
+                    })
+
+        if it.get("handoff_count", 0) > max_handoffs:
+            already = any(a.get("type") == "budget_exceeded"
+                          and a.get("work_item_id") == wi_id
+                          and (a.get("budget") or "") == "handoffs"
+                          for a in open_alerts + alerts_new)
+            if not already:
+                alerts_new.append({
+                    "id": next_alert_id(open_alerts + alerts_new),
+                    "created_at": now_z,
+                    "type": "budget_exceeded",
+                    "work_item_id": wi_id,
+                    "budget": "handoffs",
+                    "message": f"WI {wi_id} handoff_count={it['handoff_count']} > {max_handoffs}",
+                    "action_taken": "none",
+                })
+
+        if it.get("stale_requeue_count", 0) > max_interventions:
+            already = any(a.get("type") == "budget_exceeded"
+                          and a.get("work_item_id") == wi_id
+                          and (a.get("budget") or "") == "watchdog_interventions"
+                          for a in open_alerts + alerts_new)
+            if not already:
+                alerts_new.append({
+                    "id": next_alert_id(open_alerts + alerts_new),
+                    "created_at": now_z,
+                    "type": "budget_exceeded",
+                    "work_item_id": wi_id,
+                    "budget": "watchdog_interventions",
+                    "message": f"WI {wi_id} stale_requeue_count={it['stale_requeue_count']} > {max_interventions}",
+                    "action_taken": "none",
+                })
+
+        if it.get("attempt_count", 0) > max_attempts:
+            already = any(a.get("type") == "budget_exceeded"
+                          and a.get("work_item_id") == wi_id
+                          and (a.get("budget") or "") == "attempts"
+                          for a in open_alerts + alerts_new)
+            if not already:
+                alerts_new.append({
+                    "id": next_alert_id(open_alerts + alerts_new),
+                    "created_at": now_z,
+                    "type": "budget_exceeded",
+                    "work_item_id": wi_id,
+                    "budget": "attempts",
+                    "message": f"WI {wi_id} attempt_count={it['attempt_count']} > {max_attempts}",
+                    "action_taken": "none",
+                })
+
+    # ── Build transaction (only if anything changed) ──────────────────
+    writes = []
+    artifacts = []
+    new_wi_revision = wi_store.get("revision", 0)
+    new_loop_revision = loop_state.get("revision", 0)
+    new_wd_revision = wd_store.get("revision", 0)
+
+    if items_changed:
+        new_wi_store = {
+            "revision": wi_store.get("revision", 0) + 1,
+            "updated_at": now_z,
+            "items": items,
+        }
+        new_wi_revision = new_wi_store["revision"]
+        writes.append({
+            "path": ".agent-atelier/work-items.json",
+            "expected_revision": wi_store.get("revision"),
+            "content": new_wi_store,
+        })
+        artifacts.append(".agent-atelier/work-items.json")
+
+    if loop_changed:
+        new_loop["revision"] = loop_state.get("revision", 0) + 1
+        new_loop["updated_at"] = now_z
+        new_loop_revision = new_loop["revision"]
+        writes.append({
+            "path": ".agent-atelier/loop-state.json",
+            "expected_revision": loop_state.get("revision"),
+            "content": new_loop,
+        })
+        artifacts.append(".agent-atelier/loop-state.json")
+
+    # Always update watchdog-jobs (last_tick_at + appended alerts)
+    merged_alerts = list(open_alerts) + list(alerts_new)
+    new_wd = dict(wd_store)
+    new_wd["open_alerts"] = merged_alerts
+    new_wd["last_tick_at"] = now_z
+    new_wd["revision"] = wd_store.get("revision", 0) + 1
+    new_wd_revision = new_wd["revision"]
+    writes.append({
+        "path": ".agent-atelier/watchdog-jobs.json",
+        "expected_revision": wd_store.get("revision"),
+        "content": new_wd,
+    })
+    artifacts.append(".agent-atelier/watchdog-jobs.json")
+
+    if writes:
+        res = subprocess.run(
+            [state_commit_path(), "--root", root],
+            input=json.dumps({"writes": writes}),
+            capture_output=True, text=True,
+        )
+        try:
+            sc_out = json.loads(res.stdout) if res.stdout else {}
+        except json.JSONDecodeError:
+            _err(4, "state_commit_unparseable_output", stdout=res.stdout, stderr=res.stderr)
+        if res.returncode != 0:
+            reason = sc_out.get("reason", "state_commit_failed")
+            if reason == "stale_revision":
+                _err(2, "stale_revision",
+                     expected=sc_out.get("expected"), actual=sc_out.get("actual"))
+            _err(4 if res.returncode >= 4 else res.returncode, reason, detail=sc_out)
+
+    output = {
+        "tick_at": now_z,
+        "actions": actions,
+        "alerts": alerts_new,
+        "auto_transitioned": auto_transitioned,
+        "escalations": escalations,
+        "committed_revision": new_wd_revision,
+        "changed": bool(items_changed or loop_changed or alerts_new),
+        "artifacts": artifacts,
+    }
+    print(json.dumps(output, indent=2, ensure_ascii=False))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("tick")
+
+    args = parser.parse_args()
+    root = resolve_root()
+    try:
+        if args.cmd == "tick":
+            cmd_tick(root, args)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        _err(4, "runtime_error", detail=str(exc))
+
+
+if __name__ == "__main__":
+    main()
