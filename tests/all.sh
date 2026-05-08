@@ -262,6 +262,15 @@ else
   echo "  SKIP: tests/recovery_contracts.sh not found or not executable"
 fi
 
+# ── Script contracts tests ───────────────────────────────────────────
+if [ -x "$ROOT/tests/script_contracts.sh" ]; then
+  if "$ROOT/tests/script_contracts.sh" >/dev/null 2>&1; then
+    pass "Script contracts tests pass"
+  else
+    fail "Script contracts tests failed"
+  fi
+fi
+
 # ── Summary ──────────────────────────────────────────────────────────
 echo ""
 echo "Results: ${PASS} passed, ${FAIL} failed (${SKILL_COUNT} skills found)"
