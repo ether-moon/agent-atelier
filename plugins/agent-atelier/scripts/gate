@@ -1,0 +1,421 @@
+#!/usr/bin/env python3
+"""
+gate — Human decision gate lifecycle.
+
+Subcommands:
+  list                              List open + resolved gates.
+  open <json>                       Create a new HDR; updates blocked WIs and loop-state.
+  resolve <HDR-ID> --chosen <opt>   Resolve a gate; unblocks WIs.
+
+Gates are NOT native tasks — no `native_task_sync` hint is emitted.
+
+Exit codes:
+  0 success
+  1 invalid input / validation
+  2 stale revision / precondition
+  3 not found
+  4 IO / runtime
+"""
+
+import argparse
+import datetime
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+
+
+def _now_z():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _err(code, msg, **extra):
+    payload = {"accepted": False, "error": msg}
+    payload.update(extra)
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    sys.exit(code)
+
+
+def resolve_root():
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        return os.path.realpath(out)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return os.path.realpath(os.getcwd())
+
+
+def state_commit_path():
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)), "state-commit")
+
+
+def read_json(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def hdr_files(root, state):
+    folder = os.path.join(root, ".agent-atelier", "human-gates", state)
+    return sorted(glob.glob(os.path.join(folder, "HDR-*.json")))
+
+
+def next_hdr_id(root):
+    """Find the next HDR-NNN id by scanning open + resolved."""
+    nums = []
+    for state in ("open", "resolved"):
+        for path in hdr_files(root, state):
+            m = re.search(r"HDR-(\d+)\.json$", path)
+            if m:
+                nums.append(int(m.group(1)))
+    nxt = (max(nums) + 1) if nums else 1
+    return f"HDR-{nxt:03d}"
+
+
+def run_state_commit(root, tx):
+    res = subprocess.run(
+        [state_commit_path(), "--root", root],
+        input=json.dumps(tx),
+        capture_output=True, text=True,
+    )
+    try:
+        sc_out = json.loads(res.stdout) if res.stdout else {}
+    except json.JSONDecodeError:
+        _err(4, "state_commit_unparseable_output", stdout=res.stdout, stderr=res.stderr)
+    if res.returncode != 0:
+        reason = sc_out.get("reason", "state_commit_failed")
+        if reason == "stale_revision":
+            print(json.dumps({"accepted": False, "error": "stale_revision",
+                              "expected": sc_out.get("expected"),
+                              "actual": sc_out.get("actual")},
+                             indent=2, ensure_ascii=False))
+            sys.exit(2)
+        _err(4 if res.returncode >= 4 else res.returncode, reason, detail=sc_out)
+    return sc_out
+
+
+# ── list ───────────────────────────────────────────────────────────────
+def cmd_list(root, _args):
+    open_gates = []
+    resolved_gates = []
+    seen = set()
+    # Resolved is authoritative — read it first so duplicates favor resolved
+    for path in hdr_files(root, "resolved"):
+        d = read_json(path)
+        gid = d.get("id")
+        if gid in seen:
+            continue
+        seen.add(gid)
+        resolved_gates.append({
+            "id": gid,
+            "question": d.get("question"),
+            "chosen_option": (d.get("resolution") or {}).get("chosen_option"),
+            "resolved_at": (d.get("resolution") or {}).get("resolved_at"),
+        })
+    for path in hdr_files(root, "open"):
+        d = read_json(path)
+        gid = d.get("id")
+        if gid in seen:
+            continue
+        seen.add(gid)
+        open_gates.append({
+            "id": gid,
+            "question": d.get("question"),
+            "blocked_work_items": d.get("blocked_work_items", []),
+            "blocking": d.get("blocking", False),
+            "options": d.get("options", []),
+            "recommended_option": d.get("recommended_option"),
+            "created_at": d.get("created_at"),
+        })
+    print(json.dumps({"open": open_gates, "resolved": resolved_gates},
+                     indent=2, ensure_ascii=False))
+
+
+# ── open ───────────────────────────────────────────────────────────────
+def cmd_open(root, args):
+    raw = args.payload
+    if raw == "-" or raw is None:
+        raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        _err(1, "invalid_json", detail=str(e))
+    if not isinstance(payload, dict):
+        _err(1, "payload_must_be_object")
+
+    if not payload.get("question"):
+        _err(1, "missing_field", field="question")
+    options = payload.get("options")
+    if not isinstance(options, list) or len(options) == 0:
+        _err(1, "missing_or_empty_options")
+
+    blocked_wis = payload.get("blocked_work_items") or []
+    blocking = bool(payload.get("blocking", False))
+
+    hdr_id = next_hdr_id(root)
+    now = _now_z()
+
+    # Read current state
+    wi_path = os.path.join(root, ".agent-atelier", "work-items.json")
+    loop_path = os.path.join(root, ".agent-atelier", "loop-state.json")
+    if not os.path.exists(wi_path) or not os.path.exists(loop_path):
+        _err(4, "state_not_initialized")
+    wi_store = read_json(wi_path)
+    loop_state = read_json(loop_path)
+
+    hdr = {
+        "id": hdr_id,
+        "created_at": now,
+        "state_revision": loop_state.get("revision"),
+        "triggered_by": payload.get("triggered_by"),
+        "state": "open",
+        "question": payload["question"],
+        "why_now": payload.get("why_now"),
+        "context": payload.get("context"),
+        "gate_criteria": payload.get("gate_criteria", {
+            "irreversibility": None,
+            "blast_radius": None,
+            "product_meaning_change": None,
+        }),
+        "options": options,
+        "recommended_option": payload.get("recommended_option"),
+        "blocking": blocking,
+        "blocked_work_items": blocked_wis,
+        "unblocked_work_items": [],
+        "resume_target": payload.get("resume_target"),
+        "default_if_no_response": payload.get("default_if_no_response", "continue_unblocked_work"),
+        "linked_escalations": payload.get("linked_escalations", []),
+        "resolution": {
+            "resolved_at": None,
+            "chosen_option": None,
+            "user_notes": None,
+            "follow_up_actions": [],
+        },
+    }
+
+    # Update blocked WIs
+    items = list(wi_store.get("items", []))
+    if blocked_wis:
+        for i, it in enumerate(items):
+            if it.get("id") in blocked_wis:
+                new_it = dict(it)
+                new_it["status"] = "blocked_on_human_gate"
+                new_it["blocked_by_gate"] = hdr_id
+                if "resume_target" in payload:
+                    new_it["resume_target"] = payload["resume_target"]
+                new_it["revision"] = it.get("revision", 0) + 1
+                items[i] = new_it
+
+    new_wi_store = {
+        "revision": wi_store.get("revision", 0) + 1,
+        "updated_at": now,
+        "items": items,
+    }
+
+    # Update loop-state
+    open_gates = list(loop_state.get("open_gates", []))
+    if hdr_id not in open_gates:
+        open_gates.append(hdr_id)
+    new_loop = dict(loop_state)
+    new_loop["open_gates"] = open_gates
+    new_loop["revision"] = loop_state.get("revision", 0) + 1
+    new_loop["updated_at"] = now
+
+    writes = [
+        {
+            "path": f".agent-atelier/human-gates/open/{hdr_id}.json",
+            "expected_revision": None,
+            "content": hdr,
+        },
+        {
+            "path": ".agent-atelier/work-items.json",
+            "expected_revision": wi_store.get("revision"),
+            "content": new_wi_store,
+        },
+        {
+            "path": ".agent-atelier/loop-state.json",
+            "expected_revision": loop_state.get("revision"),
+            "content": new_loop,
+        },
+    ]
+
+    # Update _index.md (best-effort, leave existing markdown alone unless missing)
+    index_path = os.path.join(root, ".agent-atelier", "human-gates", "_index.md")
+    if os.path.exists(index_path):
+        with open(index_path, encoding="utf-8") as fh:
+            idx = fh.read()
+        # Append a row to the Open Gates table — simple line-insert just before
+        # the "## Resolved Gates" heading.
+        new_row = (f"| {hdr_id} | {hdr['question']} | {hdr.get('triggered_by') or '—'} | "
+                   f"{'yes' if blocking else 'no'} | "
+                   f"{', '.join(blocked_wis) if blocked_wis else '—'} | "
+                   f"{now} |\n")
+        if "## Resolved Gates" in idx:
+            new_idx = idx.replace("## Resolved Gates", new_row + "\n## Resolved Gates", 1)
+        else:
+            new_idx = idx + "\n" + new_row
+        writes.append({
+            "path": ".agent-atelier/human-gates/_index.md",
+            "expected_revision": None,
+            "content": new_idx,
+        })
+
+    tx = {"writes": writes}
+    run_state_commit(root, tx)
+
+    output = {
+        "accepted": True,
+        "committed_revision": new_wi_store["revision"],
+        "changed": True,
+        "gate_id": hdr_id,
+        "artifacts": [w["path"] for w in writes],
+    }
+    print(json.dumps(output, indent=2, ensure_ascii=False))
+
+
+# ── resolve ────────────────────────────────────────────────────────────
+def cmd_resolve(root, args):
+    hdr_id = args.id
+    chosen = args.chosen
+
+    open_path = os.path.join(root, ".agent-atelier", "human-gates", "open", f"{hdr_id}.json")
+    resolved_path = os.path.join(root, ".agent-atelier", "human-gates", "resolved", f"{hdr_id}.json")
+
+    if not os.path.exists(open_path):
+        if os.path.exists(resolved_path):
+            # Idempotent: already resolved
+            print(json.dumps({
+                "accepted": True,
+                "changed": False,
+                "replayed": True,
+                "gate_id": hdr_id,
+            }, indent=2, ensure_ascii=False))
+            return
+        available = [os.path.basename(p).replace(".json", "")
+                     for p in hdr_files(root, "open")]
+        _err(3, "gate_not_found", requested=hdr_id, open=available)
+
+    hdr = read_json(open_path)
+    options = hdr.get("options", [])
+    valid_labels = []
+    for opt in options:
+        if isinstance(opt, dict):
+            valid_labels.append(opt.get("label"))
+        else:
+            valid_labels.append(str(opt))
+
+    if chosen not in valid_labels:
+        _err(1, "invalid_chosen_option", chosen=chosen, valid=valid_labels)
+
+    now = _now_z()
+    new_hdr = dict(hdr)
+    new_hdr["state"] = "resolved"
+    new_hdr["resolution"] = {
+        "resolved_at": now,
+        "chosen_option": chosen,
+        "user_notes": args.notes,
+        "follow_up_actions": [],
+    }
+
+    wi_path = os.path.join(root, ".agent-atelier", "work-items.json")
+    loop_path = os.path.join(root, ".agent-atelier", "loop-state.json")
+    wi_store = read_json(wi_path)
+    loop_state = read_json(loop_path)
+
+    blocked_wis = hdr.get("blocked_work_items", [])
+    items = list(wi_store.get("items", []))
+    unblocked = []
+    if blocked_wis:
+        for i, it in enumerate(items):
+            if it.get("id") in blocked_wis and it.get("blocked_by_gate") == hdr_id:
+                new_it = dict(it)
+                new_it["status"] = "ready"
+                new_it["blocked_by_gate"] = None
+                new_it["revision"] = it.get("revision", 0) + 1
+                items[i] = new_it
+                unblocked.append(it.get("id"))
+
+    new_hdr["unblocked_work_items"] = unblocked
+
+    new_wi_store = {
+        "revision": wi_store.get("revision", 0) + 1,
+        "updated_at": now,
+        "items": items,
+    }
+
+    open_gates = [g for g in loop_state.get("open_gates", []) if g != hdr_id]
+    new_loop = dict(loop_state)
+    new_loop["open_gates"] = open_gates
+    new_loop["revision"] = loop_state.get("revision", 0) + 1
+    new_loop["updated_at"] = now
+
+    writes = [
+        {
+            "path": f".agent-atelier/human-gates/resolved/{hdr_id}.json",
+            "expected_revision": None,
+            "content": new_hdr,
+        },
+        {
+            "path": ".agent-atelier/work-items.json",
+            "expected_revision": wi_store.get("revision"),
+            "content": new_wi_store,
+        },
+        {
+            "path": ".agent-atelier/loop-state.json",
+            "expected_revision": loop_state.get("revision"),
+            "content": new_loop,
+        },
+    ]
+    deletes = [f".agent-atelier/human-gates/open/{hdr_id}.json"]
+
+    tx = {"writes": writes, "deletes": deletes}
+    run_state_commit(root, tx)
+
+    output = {
+        "accepted": True,
+        "committed_revision": new_wi_store["revision"],
+        "changed": True,
+        "gate_id": hdr_id,
+        "chosen_option": chosen,
+        "unblocked_work_items": unblocked,
+        "artifacts": [w["path"] for w in writes] + deletes,
+    }
+    print(json.dumps(output, indent=2, ensure_ascii=False))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("list")
+
+    p_open = sub.add_parser("open")
+    p_open.add_argument("payload", nargs="?", default=None)
+
+    p_res = sub.add_parser("resolve")
+    p_res.add_argument("id")
+    p_res.add_argument("--chosen", required=True)
+    p_res.add_argument("--notes", default=None)
+
+    args = parser.parse_args()
+    root = resolve_root()
+
+    try:
+        if args.cmd == "list":
+            cmd_list(root, args)
+        elif args.cmd == "open":
+            cmd_open(root, args)
+        elif args.cmd == "resolve":
+            cmd_resolve(root, args)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        _err(4, "runtime_error", detail=str(exc))
+
+
+if __name__ == "__main__":
+    main()
