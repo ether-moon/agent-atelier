@@ -1,0 +1,24 @@
+## Decisions Made
+- Resolve is idempotent when the open/ file is missing but resolved/ exists — returns `changed: false, replayed: true` rather than error.
+- The _index.md update is best-effort (only modified if the file exists) and uses simple string-replace to insert a new row before "## Resolved Gates".
+- Both string options (just labels) and dict options ({label, description}) are accepted in the open payload's options list.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- HDR files use expected_revision: null because they are created fresh and have no revision tracking (per state-defaults.md HDR Contract Notes).
+
+## Open Questions
+- None
+
+## Context
+Third of 6 mechanical script ports. Gate is the only mutating script
+that does NOT emit a native_task_sync hint — gates are control-plane
+artifacts, not work items.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
