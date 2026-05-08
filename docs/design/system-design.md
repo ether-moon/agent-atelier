@@ -242,7 +242,7 @@ DISCOVER ──► SPEC_DRAFT ──► SPEC_HARDEN ──► BUILD_PLAN ──�
                                  └──────────────────────────────► DONE
 ```
 
-This diagram shows the **dominant control flow for an unblocked work item**, not an exclusive global phase machine. The formal **Mode Transition Protocol** (valid transition table, overlap rules, invalid transition rejection) is defined in `skills/run/SKILL.md § Mode Transition Protocol`.
+This diagram shows the **dominant control flow for an unblocked work item**, not an exclusive global phase machine. The formal **Mode Transition Protocol** (valid transition table, overlap rules, invalid transition rejection) is defined in `skills/execute/SKILL.md § Mode Transition Protocol`.
 
 ### State Representation
 
@@ -1418,7 +1418,7 @@ Agent Teams cannot restore teammates on session resume. Recovery relies on **com
 2. Builders produce atomic commits — every meaningful work unit is committed
 3. Each failed or interrupted WI attempt records hypothesis, repro steps, commands run, touched paths, and failing checks in an attempt journal committed by State Manager
 4. Uncommitted code in worktrees is discardable because operational knowledge survives in the attempt journal
-5. New session: read `loop-state.json`, `work-items.json`, open HDRs, attempt journals, and `git log` → identify last committed checkpoint → start `/agent-atelier:run` → recreate fresh monitors and both orchestration cron jobs → run one startup resume sweep that immediately requeues stranded `implementing` WIs from the crashed runtime and resumes validation/review from disk → resume
+5. New session: read `loop-state.json`, `work-items.json`, open HDRs, attempt journals, and `git log` → identify last committed checkpoint → start `/agent-atelier:execute` → recreate fresh monitors and both orchestration cron jobs → run one startup resume sweep that immediately requeues stranded `implementing` WIs from the crashed runtime and resumes validation/review from disk → resume
 
 Git workflow principles: trunk-based development, atomic commits (~100 lines), commit-as-savepoint pattern.
 
