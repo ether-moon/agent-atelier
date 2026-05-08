@@ -1,0 +1,24 @@
+## Decisions Made
+- watchdog auto-promotes the next queued candidate set on stale demotion (FIFO is mechanical, not judgment) — matches reference/execution-details.md.
+- Budget alerts are deduplicated against existing open_alerts by (type, work_item_id, budget) tuple to keep tick idempotent across runs.
+- Always bumps watchdog-jobs.json revision (last_tick_at update) even when nothing else changed, so callers can verify the tick ran.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- watchdog cannot emit native_task_sync hints — its actions cover multiple WIs across multiple categories, and the spec explicitly says the orchestrator handles task sync after reading actions[].
+
+## Open Questions
+- None
+
+## Context
+Fourth of 6 mechanical script ports. Watchdog is the only script that
+doesn't follow the standard `accepted/committed_revision` shape — its
+output is action-centric (actions/alerts/auto_transitioned).
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
