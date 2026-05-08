@@ -181,6 +181,15 @@ else
   echo "  SKIP: tests/schema_validation.sh not found or not executable"
 fi
 
+# ── Plan hash helper tests ───────────────────────────────────────────
+if [ -x "$ROOT/tests/plan_hash_test.sh" ]; then
+  if "$ROOT/tests/plan_hash_test.sh" >/dev/null 2>&1; then
+    pass "Plan hash helper tests pass"
+  else
+    fail "Plan hash helper tests failed"
+  fi
+fi
+
 # ── state-commit script ──────────────────────────────────────────────
 COMMIT_SCRIPT=$(find "$ROOT/plugins" -name "state-commit" -path "*/scripts/*" -type f 2>/dev/null | head -1)
 if [ -n "$COMMIT_SCRIPT" ] && [ -x "$COMMIT_SCRIPT" ]; then
