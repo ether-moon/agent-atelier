@@ -1,0 +1,42 @@
+## Decisions Made
+- wi_plan_hash로 무효화 trigger 변경 (status_class collapsing, plan-차원 필드만 hash): work-items.json revision은 IMPLEMENT 단계 status 전환마다 bump되어 무효화 오발 / 상태 모델이 stateless해짐
+- state-commit에 mode→IMPLEMENT semantic gate 도입: caller(plan/execute) 책임만으로는 사용자 의도(필수 게이트) mechanical 보장 안 됨 / opaque writer 원칙에서 한 가지만 정확히 좁혀 도입
+- skills/monitors 유지 (thin shim): cron prompt에서 슬래시 호출 안정성 + 자연어 발견성. 사용자 표면 단순화는 frontmatter description으로 처리
+- AskUserQuestion primary, 묶음 5→3: 도구의 4-question cap에 맞춤 + 자유형 매핑 모호성 제거. Other 입력은 도구 자체 동작이라 별도 옵션 추가 불필요
+- active_plan_cycle_id를 loop-state.json에 영속화: cold resume의 권위 있는 anchor. 게이트 통과 시 null 클리어 (plan_approval과 동일 transaction)
+- JSONL append은 Orchestrator만: PM/Architect는 SendMessage로 전달 → Orchestrator가 jsonl 작성. single-writer 모델의 plan 사이클 확장
+- gate-pass atomicity 두 케이스 분리: /execute는 plan_approval+mode→IMPLEMENT+cycle/gate clear 한 transaction; /plan 단독은 mode 유지
+- 질문 예산은 Orchestrator 실시간 enforcement: watchdog 15분 cycle은 mid-conversation 너무 늦음. watchdog은 cross-session 알림 발행만
+- 0 WI 단축 분기: BUILD_PLAN 종료 시 ready WI=0이면 IMPLEMENT 거치지 않고 DONE
+- skill 개수 정정 9→10 (현 sample): 변경 범위 추산을 정확히 / monitors shim 유지 결정의 근거
+- /execute --mode escape hatch 제거 명시: 사용자 의도(필수 게이트)와 충돌 / power-user 우회 경로 제공 안 함
+- spec_hash 입력은 behavior-spec.md 단독: assumptions/decisions는 plan 시점 산출물로 입력 아님
+- Builder plan_approval_request 명명 충돌 무시: loop-state.plan_approval은 글로벌, Builder의 메시지 페이로드는 국지 / 위치로 자연 구분
+
+## Problems Encountered
+- spec 초기 설계의 work-items.json revision 무효화는 IMPLEMENT 진입 즉시 무한 재진입 루프 유발: 3개 reviewer 모두 blocker로 지적, wi_plan_hash로 해결
+- monitors가 LLM 전용 도구 의존이라 순수 스크립트 변환 불가 + cron prompt가 절대경로 substitute 시 plugin 이동에 취약: thin shim 패턴으로 해결
+- 스크립트는 TaskCreate/TaskUpdate 호출 불가 (LLM 전용 도구): native_task_sync hint 패턴으로 호출자 책임 분리
+- plan-conversations/<cycle>.jsonl 동시 append race 위험: Orchestrator 단일 작성자 규칙으로 해결
+- 무한 핑퐁 위험: 한 phase 같은 round 5회 재진행 시 사용자 알림 안전장치 추가
+- AskUserQuestion 4-question cap을 spec이 모르고 5개 묶음으로 설계: 3개로 축소 + 1슬롯 여유
+
+## Constraints Identified
+- AskUserQuestion 도구 cap: 한 번 호출에 최대 4 questions / 묶음 단위 결정 직접 영향
+- LLM 전용 도구 (Bash run_in_background, TaskOutput, TaskStop, TaskCreate, TaskUpdate) 스크립트에서 호출 불가: monitors shim, native_task_sync hint 패턴 모두 이 제약에서 파생
+- CronCreate prompt는 fire-time substitution 없음: cron 생성 시점에 절대경로 substitute 필수
+- state-commit의 single-writer 보장: JSONL append과 plan-conversations 모두 이 모델 유지
+- 기존 install 마이그레이션: init은 누락 top-level key만 머지, nested는 절대 손대지 않음
+- AGENTS.md "skills 9개" 잘못된 수치: 실제 10개. 정정 필요
+
+## Open Questions
+- None — 모호점 4개를 사용자가 권장안 일괄 채택으로 모두 해결
+
+## Context
+agent-atelier 플러그인 사용자 진입점 재설계 spec 개정 세션. 3개 피어 LLM(Gemini, Codex, Claude)에 spec을 리뷰시키고 25개 이슈를 도출 → 중복 제거 후 OBVIOUS 15 / AMBIGUOUS 10으로 분류 → autofixing-and-escalating으로 사용자 결정 받아 일괄 spec 반영. 산출물: docs/superpowers/specs/2026-05-08-plan-execute-workflow-design.md (393줄 추가/53줄 삭제). 다음 단계는 사용자 최종 검토 후 writing-plans로 구현 계획 수립 → subagent-driven 또는 inline 실행.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
