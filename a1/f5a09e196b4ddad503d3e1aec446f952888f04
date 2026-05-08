@@ -1,0 +1,21 @@
+## Decisions Made
+- Replaced four user-facing slash command hints in stop/task-completed hooks with the bash invocations from the spec migration table.
+- Used the literal `${CLAUDE_PLUGIN_ROOT}` token in the warning text (escaped at the shell level) so users see the same form documented elsewhere.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Phase G1 of the plan/execute simplification: the lifecycle, candidate, gate, validate, watchdog, wi, and init operations now live as bash scripts under plugins/agent-atelier/scripts/, so hook warnings must point users to those rather than the deprecated slash commands. Skill directories are removed in H1.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
