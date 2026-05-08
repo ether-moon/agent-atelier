@@ -32,6 +32,21 @@ This completes partially applied transactions before any other recovery.
 
 Cold resume assumes the previous runtime is gone. Reachable-owner resume applies only to the in-session 15-minute recovery pulse, not to this protocol.
 
+### Step 2.5: Plan Cycle Cold Resume
+
+If `loop-state.active_plan_cycle_id` is non-null, the previous session was mid-ping-pong. Read `plan-conversations/<cycle-id>.jsonl`'s last entry to determine where to resume:
+
+| Last entry type | Resume action |
+|----------------|---------------|
+| `clarifying_question` | Re-present the questions to the user via AskUserQuestion |
+| `user_response` | Forward to the role that emitted the corresponding question; continue phase |
+| `phase_transition` | Continue with new phase's first round |
+| `no_more_questions` | Check whether all required roles have signaled; advance phase if so |
+| `gate_presented` | Re-present the final gate to the user |
+| `gate_resolved` (with `y`) but `plan_approval` is null | This indicates a crash mid-transaction; replay via WAL is canonical, then re-check `loop-state.plan_approval` |
+
+Cycle id is the authoritative anchor — never infer from "newest jsonl file".
+
 ### Step 3: Classify Each Work Item
 
 For each WI, determine its recoverable state:
@@ -39,7 +54,7 @@ For each WI, determine its recoverable state:
 | Current Status | Lease | Action |
 |---|---|---|
 | `implementing` | Expired | Requeue to `ready`, clear lease, increment `stale_requeue_count` |
-| `implementing` | Still valid from the crashed runtime | Mark for immediate reclaim in the startup resume sweep started by `/agent-atelier:run`; do not wait for lease expiry |
+| `implementing` | Still valid from the crashed runtime | Mark for immediate reclaim in the startup resume sweep started by `/agent-atelier:execute`; do not wait for lease expiry |
 | `candidate_validating` | Stale (> timeout) | Demote candidate, requeue WI to `ready` |
 | `candidate_validating` | Recent | Resume — VRM can pick up active candidate |
 | `reviewing` | Stale (> timeout) | Re-dispatch reviewers |
@@ -65,19 +80,19 @@ Scan `human-gates/open/` for pending HDRs. Cross-reference with `loop-state.json
 
 Apply all mechanical recovery changes (stale lease expiry, candidate demotion) in a single `state-commit` transaction via the watchdog `tick` subcommand.
 
-Still-valid `implementing` leases from the crashed runtime are not cleared by `watchdog tick`. They are reclaimed in the startup resume sweep that runs immediately after `/agent-atelier:run` restores the core team.
+Still-valid `implementing` leases from the crashed runtime are not cleared by `watchdog tick`. They are reclaimed in the startup resume sweep that runs immediately after `/agent-atelier:execute` restores the core team.
 
 ### Step 6: Spawn Fresh Team
 
-Start a new orchestration loop (`/agent-atelier:run`). The orchestrator reads the recovered state and spawns fresh teammates based on the current mode and WI states.
+Start a new orchestration loop (`/agent-atelier:execute`). The orchestrator reads the recovered state and spawns fresh teammates based on the current mode and WI states.
 
 ### Step 6b: Run-Owned Runtime Restoration
 
-Do not separately invoke `/agent-atelier:monitors spawn` after calling `/agent-atelier:run`. The run skill owns restoration of session-scoped runtime infrastructure:
+Do not separately invoke `/agent-atelier:monitors spawn` after calling `/agent-atelier:execute`. The execute skill owns restoration of session-scoped runtime infrastructure:
 
 - it recreates fresh always-on monitors
 - it recreates the monitor poll job (`*/2`) wired to `/agent-atelier:monitors check`
-- it recreates the watchdog recovery pulse job (`*/15`) wired to `/agent-atelier:watchdog tick` plus the Orchestrator resume sweep
+- it recreates the watchdog recovery pulse job (`*/15`) wired to `bash <plugin-root>/scripts/watchdog tick` plus the Orchestrator resume sweep
 - it runs one startup resume sweep before steady-state dispatch
 
 During that startup resume sweep:
@@ -88,7 +103,7 @@ During that startup resume sweep:
 - `reviewing` WIs resume from persisted review artifacts with fresh or reachable reviewers as appropriate
 - if CI validation was already in progress when the session crashed, the Orchestrator re-creates the ci-status monitor for the active candidate set if needed
 
-Previous session's monitors and cron jobs are gone — they were session-scoped and died with the crashed session. `/agent-atelier:run` is the only component that should recreate them.
+Previous session's monitors and cron jobs are gone — they were session-scoped and died with the crashed session. `/agent-atelier:execute` is the only component that should recreate them.
 
 ### Step 7: Resume From Committed State Only
 
@@ -109,7 +124,7 @@ If a state file contains invalid JSON (disk corruption, manual edit, encoding er
 
 1. Identify the corrupted file from the error message.
 2. Check `git log` for the last known-good version and restore it: `git checkout HEAD -- .agent-atelier/<file>`.
-3. If no git history exists (file was never committed), delete it and re-run `/agent-atelier:init` to regenerate defaults.
+3. If no git history exists (file was never committed), delete it and re-run `bash <plugin-root>/scripts/init-helpers.sh` to regenerate defaults.
 4. If `.pending-tx.json` is itself corrupted, delete it — the incomplete transaction is lost but state files remain at their last consistent revision.
 
 ## Mandatory Test Scenarios
@@ -124,3 +139,5 @@ These scenarios must work correctly (from recovery-spec.md):
 6. **Stale revision rejected** — Concurrent writes detected and rejected by state-commit
 7. **Cold resume from disk** — Full state reconstruction from files + git log without conversation history
 8. **Valid lease from crashed runtime** — Startup resume sweep requeues stranded `implementing` work immediately instead of waiting for lease expiry
+9. **Plan cycle cold resume** — Session crashes during ping-pong. Next `/plan` or `/execute` reads `active_plan_cycle_id` and resumes from last jsonl entry without losing user decisions.
+10. **state-commit IMPLEMENT-mode mechanical gate** — Direct attempt to write `mode: IMPLEMENT` without valid `plan_approval` is rejected with `implement_gate_violation`.
