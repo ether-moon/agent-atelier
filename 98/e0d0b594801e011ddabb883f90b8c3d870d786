@@ -1,0 +1,22 @@
+## Decisions Made
+- Moved the fast-track parity assertion off MONITORS_SKILL onto MONITOR_RUNTIME because the monitors skill is now a thin shim and the body lives in references/monitor-runtime.md (commit 009eb09).
+- Pointed Test 8 at scripts/lifecycle directly rather than execute SKILL, since the "complete-only-from-reviewing" rule is now enforced in the lifecycle Python helper, not skill prose.
+- Updated three design docs in this commit (not deferred to I4) because recovery_contracts.sh asserts on those literal strings; otherwise I2 step 3 ("all should pass") could not be satisfied.
+
+## Problems Encountered
+- Initial run of recovery_contracts.sh after re-pointing assertions still showed 2 failures: recovery-spec.md and session-limit-retry.md still embedded the legacy /agent-atelier:run literal. Fixing the strings in those design docs unblocked the contract suite.
+
+## Constraints Identified
+- Contract tests use grep -Fq, so any whitespace/quote drift in the asserted literal breaks the test silently. Kept the quoted strings byte-identical to existing prose.
+
+## Open Questions
+- None.
+
+## Context
+Phase I2 of the plan/execute migration. The orchestration_contracts and recovery_contracts suites still grepped for /agent-atelier:run and skills/run/ references that no longer exist after the refactor. This commit re-anchors those assertions to the post-migration layout (execute skill, monitor-runtime reference, lifecycle script) and pulls the minimal corresponding string updates into recovery-spec.md / session-limit-retry.md / system-design.md. Broader prose cleanup of design docs is deferred to I4.
+
+## Recorded Decisions
+- None.
+
+## Vault Entries Referenced
+- None.
