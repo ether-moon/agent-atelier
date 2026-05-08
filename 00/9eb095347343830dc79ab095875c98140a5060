@@ -1,0 +1,22 @@
+## Decisions Made
+- monitors SKILL.md is now ~21 lines — only frontmatter + delegation to references/monitor-runtime.md.
+- reference/event-classification.md removed (already integrated into monitor-runtime.md in earlier phase).
+
+## Problems Encountered
+- None.
+
+## Constraints Identified
+- monitors must remain a slash-callable skill (not migrated to scripts) because cron prompts and orchestrator both invoke it via slash form, and it depends on LLM-only tools (run_in_background Bash, TaskOutput, TaskStop).
+- The shim's frontmatter description is marked [INTERNAL — invoked by orchestrator/cron, not for direct user use] per spec.
+
+## Open Questions
+- None.
+
+## Context
+F3 task of Phase F: reduced monitors skill to a thin shim. Body delegates to references/monitor-runtime.md (already present from earlier phase). Empty reference subdir removed.
+
+## Recorded Decisions
+- None.
+
+## Vault Entries Referenced
+- None.
