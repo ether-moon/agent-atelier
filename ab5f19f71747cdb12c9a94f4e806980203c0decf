@@ -1,0 +1,21 @@
+## Decisions Made
+- Added three new top-level fields to loop-state.json defaults: plan_approval, active_plan_cycle_id, plan_gate (all initialized to null)
+- Added three watchdog defaults: plan_question_budget=30, plan_question_warn_at=25, plan_user_response_timeout_hours=24
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Task A1 of Phase A in plan/execute workflow implementation. Modified plugins/agent-atelier/references/state-defaults.md to extend default state objects per spec section "상태 모델". Schema validation tests still pass after the additions.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
