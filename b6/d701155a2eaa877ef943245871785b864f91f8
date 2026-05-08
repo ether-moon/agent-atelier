@@ -1,0 +1,25 @@
+## Decisions Made
+- Plan skill keeps mode=BUILD_PLAN after gate-pass; next /execute performs atomic BUILD_PLAN→IMPLEMENT transition. State-commit mechanical IMPLEMENT-gate enforces this.
+- Orchestrator is the single writer to plan-conversations/<cycle-id>.jsonl; PM/Architect emit ClarifyingQuestion via SendMessage.
+- Real-time question budget enforcement (>25 forces blocking:false; >30 pauses plan) is Orchestrator's responsibility, not watchdog (15-min cycle too slow).
+- AskUserQuestion is primary path; "Other" comes from the tool itself, never as an explicit option.
+
+## Problems Encountered
+- None.
+
+## Constraints Identified
+- No Builder/VRM/reviewer spawn in plan skill — those belong to execute IMPLEMENT phase.
+- active_plan_cycle_id is the authoritative resume anchor (never filesystem mtime).
+- All state mutations route through state-commit's atomic transactions.
+
+## Open Questions
+- None.
+
+## Context
+F1 task of Phase F: created the new user-facing plan skill that hosts the DISCOVER→SPEC_DRAFT→SPEC_HARDEN→BUILD_PLAN ping-pong loop with a final approval gate. Output contract returns plan_approval JSON; mode unchanged so caller's next /execute does the IMPLEMENT transition atomically.
+
+## Recorded Decisions
+- None.
+
+## Vault Entries Referenced
+- None.
