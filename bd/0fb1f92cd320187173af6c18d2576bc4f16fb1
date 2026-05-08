@@ -1,0 +1,21 @@
+## Decisions Made
+- _validate_implement_gate를 _commit 내부 Phase 1.5로 wiring (Phase 1 revision validation 직후, Phase 1b dependency cycle 직전): plan_approval/wi_plan_hash 검증이 stale revision 검사 후, dependency cycle 검사 전에 일어나야 의미 있음
+- IMPLEMENT→IMPLEMENT 전환은 통과 (이미 진입한 후의 write는 모두 정상): old_mode == 'IMPLEMENT'면 즉시 None return
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- _plan_hash.py를 동일 디렉터리에서 import하기 위해 sys.path.insert: state-commit 내부 한정 트릭, 외부 호출에는 영향 없음
+
+## Open Questions
+- None
+
+## Context
+state-commit에 IMPLEMENT-mode 진입 mechanical gate 추가 — TDD red→green 사이클로 구현. 3개 sub-test 모두 통과. plan/execute skill이 caller로서 plan_approval을 우회해도 state-commit에서 거부됨.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
