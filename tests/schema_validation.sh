@@ -68,6 +68,46 @@ else
   fail "wi-schema.md not found"
 fi
 
+# Validate new plan_approval / active_plan_cycle_id / plan_gate fields exist in loop-state defaults
+LS_BLOCK=$(awk '
+  BEGIN { found=0; injson=0 }
+  /^## loop-state.json/ { found=1; next }
+  found && /^```json/ { injson=1; next }
+  injson && /^```/ { exit }
+  injson { print }
+' "$DEFAULTS_FILE" | sed 's/"<now>"/"2026-04-08T00:00:00Z"/g')
+
+if echo "$LS_BLOCK" | python3 -c "import json,sys; d=json.load(sys.stdin); assert 'plan_approval' in d and 'active_plan_cycle_id' in d and 'plan_gate' in d" 2>/dev/null; then
+  pass "loop-state.json includes plan_approval, active_plan_cycle_id, plan_gate"
+else
+  fail "loop-state.json missing one or more of plan_approval/active_plan_cycle_id/plan_gate"
+fi
+
+# Validate new watchdog plan_* budgets
+WD_BLOCK=$(awk '
+  BEGIN { found=0; injson=0 }
+  /^## watchdog-jobs.json/ { found=1; next }
+  found && /^```json/ { injson=1; next }
+  injson && /^```/ { exit }
+  injson { print }
+' "$DEFAULTS_FILE" | sed 's/"<now>"/"2026-04-08T00:00:00Z"/g')
+
+if echo "$WD_BLOCK" | python3 -c "import json,sys; d=json.load(sys.stdin)['defaults']; assert 'plan_question_budget' in d and 'plan_question_warn_at' in d and 'plan_user_response_timeout_hours' in d" 2>/dev/null; then
+  pass "watchdog-jobs defaults include plan_question_budget/warn_at/timeout_hours"
+else
+  fail "watchdog-jobs defaults missing one or more plan_* fields"
+fi
+
+# Validate new schema files
+for schema in clarifying-question.schema.json plan-conversation-entry.schema.json; do
+  schema_path="$ROOT/plugins/agent-atelier/schema/$schema"
+  if [ -f "$schema_path" ] && python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$schema_path" 2>/dev/null; then
+    pass "$schema is valid JSON Schema"
+  else
+    fail "$schema not found or invalid"
+  fi
+done
+
 echo ""
 echo "Schema validation: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ] || exit 1
