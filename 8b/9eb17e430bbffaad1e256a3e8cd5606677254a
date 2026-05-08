@@ -1,0 +1,25 @@
+## Decisions Made
+- skills/execute/SKILL.md is now the user-facing execute (was the lifecycle skill). The lifecycle moves to scripts/lifecycle in earlier phases of this branch.
+- Phase 0 added to enforce plan gate via wi_plan_hash + spec_hash comparison. State-commit also enforces mechanically (defense in depth).
+- Cron prompts must embed absolute paths (substituted at CronCreate time) — env vars do not propagate to fresh cron subprocesses.
+- Reference files (state-machine.md, team-lifecycle.md) moved from skills/run/reference to skills/execute/reference via git mv. Internal slash references migrated.
+- /agent-atelier:monitors slash references kept (shim is the canonical caller); /agent-atelier:run replaced with /agent-atelier:execute self-references.
+
+## Problems Encountered
+- None.
+
+## Constraints Identified
+- Plan is never bypassed — Phase 0 user gate + state-commit's IMPLEMENT-mode mechanical gate provide both the user-visible enforcement and the unbypassable enforcement.
+- Builder claim flow now goes through `bash <plugin-root>/scripts/lifecycle claim` with native_task_sync hint processed by SM.
+
+## Open Questions
+- None.
+
+## Context
+F2 task of Phase F: replaced execute/SKILL.md with the new user-facing variant (Phase 0 plan gate + IMPLEMENT→DONE) and moved run's reference files into execute/reference. Old run/ directory now empty (Phase H deletes it). Old execute/reference/subcommands.md is stale lifecycle content (Phase H deletes it).
+
+## Recorded Decisions
+- None.
+
+## Vault Entries Referenced
+- None.
