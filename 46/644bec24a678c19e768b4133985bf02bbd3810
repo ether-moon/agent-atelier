@@ -1,0 +1,24 @@
+## Decisions Made
+- heartbeat uses state-commit verb mode (matches the reference subcommands.md procedure) and emits no native_task_sync hint — heartbeats don't change WI status, so there's nothing to mirror.
+- complete atomically commits work-items.json + loop-state.json (active_candidate_set -> null) when the WI being completed is the last `done` in the set, avoiding a separate `candidate clear --reason completed` step.
+- Owner mismatch on requeue is rejected only when --owner is provided AND the WI has a non-null owner — null owner means anyone can requeue.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- Manifest validation must check candidate_set_id, branch, commit, and work_item_ids all line up with active_candidate_set before allowing complete.
+
+## Open Questions
+- None
+
+## Context
+Second of 6 mechanical script ports. The aggregate harness now passes
+12 of the 16 expected smoke checks; remaining 4 (gate/watchdog/candidate/
+validate) come in C4-C7.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
