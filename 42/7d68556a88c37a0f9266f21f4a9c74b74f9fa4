@@ -1,0 +1,22 @@
+## Decisions Made
+- Kept the existing `agent-atelier <verb>` aspirational naming as section subheaders but renamed each to `scripts/<verb>` so the doc stops claiming a CLI surface that does not exist; the verbs documented are unchanged.
+- Added an explicit Surface Overview at the top of cli-surface.md so future readers see the user-facing-vs-mechanical split before diving into individual verbs.
+- Rewrote the Runtime Support Components tree in system-design.md from scratch rather than patching it, because almost every line was stale (skills list wrong, scripts list missing 6 entries, agents/ missing, monitor-runtime reference missing).
+
+## Problems Encountered
+- None. All test assertions remained green.
+
+## Constraints Identified
+- recovery_contracts.sh still asserts `\`watchdog tick\` is mechanical only.` and `creates the \`*/15\` watchdog recovery cron job` literals; preserved both byte-identically when rewriting nearby prose.
+
+## Open Questions
+- None.
+
+## Context
+Phase I4 of the plan/execute migration. cli-surface.md and system-design.md still described the legacy 10-skill layout and the `agent-atelier run` top-level command. This commit aligns both with the post-migration plugin tree and the plan/execute user surface. Smaller line-level slash migrations in recovery-spec.md and session-limit-retry.md happened in I2 (98e0d0b) because the contract tests required them.
+
+## Recorded Decisions
+- None.
+
+## Vault Entries Referenced
+- None.
