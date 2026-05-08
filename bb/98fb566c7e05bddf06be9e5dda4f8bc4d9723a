@@ -1,0 +1,22 @@
+## Decisions Made
+- Inserted Step 2.5 (Plan Cycle Cold Resume) between WAL Recovery and WI classification per plan D3 step 1
+- Migrated slash command references: /agent-atelier:run -> /agent-atelier:execute, /agent-atelier:init -> bash <plugin-root>/scripts/init-helpers.sh, /agent-atelier:watchdog tick -> bash <plugin-root>/scripts/watchdog tick. Monitor slash references remain unchanged (shim retained per plan)
+- Appended test scenarios 9 and 10 (plan cycle cold resume, state-commit IMPLEMENT-mode mechanical gate) to mandatory test scenarios
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- None
+
+## Open Questions
+- None
+
+## Context
+Phase D Task D3: Final reference update for the plan/execute restructuring. Recovery protocol now covers plan-cycle ping-pong resume and points readers to scripts/* for mechanical operations.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
