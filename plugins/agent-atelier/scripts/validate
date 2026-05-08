@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""
+validate — Validation evidence recording.
+
+Subcommand:
+  record [--manifest-path <path>]   Read a manifest JSON from stdin (or from
+                                     --manifest-path) and update orchestration
+                                     state based on manifest.status.
+
+Manifest required fields:
+  id, candidate_set_id, work_item_ids, candidate_branch, candidate_commit,
+  started_at, finished_at, status (passed|failed|environment_error), checks
+
+Behavior by manifest status:
+  passed              -> WIs candidate_validating -> reviewing.
+                          native_task_sync new_status: in_progress
+  failed              -> Atomic demotion: WIs -> ready, promotion cleared,
+                          active_candidate_set -> null.
+                          native_task_sync new_status: pending
+  environment_error   -> Manifest written to disk; no state change; no hint.
+
+Exit codes:
+  0 success
+  1 invalid input / validation
+  2 stale revision / precondition
+  3 not found
+  4 IO / runtime
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+
+
+WI_STATUS_TO_NATIVE = {
+    "pending": "pending",
+    "ready": "pending",
+    "blocked_on_human_gate": "pending",
+    "implementing": "in_progress",
+    "candidate_queued": "in_progress",
+    "candidate_validating": "in_progress",
+    "reviewing": "in_progress",
+    "done": "completed",
+}
+
+
+def _err(code, msg, **extra):
+    payload = {"accepted": False, "error": msg}
+    payload.update(extra)
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    sys.exit(code)
+
+
+def resolve_root():
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        return os.path.realpath(out)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return os.path.realpath(os.getcwd())
+
+
+def state_commit_path():
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)), "state-commit")
+
+
+def read_json(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def run_state_commit(root, tx):
+    res = subprocess.run(
+        [state_commit_path(), "--root", root],
+        input=json.dumps(tx),
+        capture_output=True, text=True,
+    )
+    try:
+        sc_out = json.loads(res.stdout) if res.stdout else {}
+    except json.JSONDecodeError:
+        _err(4, "state_commit_unparseable_output", stdout=res.stdout, stderr=res.stderr)
+    if res.returncode != 0:
+        reason = sc_out.get("reason", "state_commit_failed")
+        if reason == "stale_revision":
+            print(json.dumps({"accepted": False, "error": "stale_revision",
+                              "expected": sc_out.get("expected"),
+                              "actual": sc_out.get("actual")},
+                             indent=2, ensure_ascii=False))
+            sys.exit(2)
+        _err(4 if res.returncode >= 4 else res.returncode, reason, detail=sc_out)
+    return sc_out
+
+
+def build_native_sync(wi_ids, new_wi_status):
+    return {
+        "action": "update",
+        "targets": [
+            {
+                "subject_prefix": f"{wid}:",
+                "new_status": WI_STATUS_TO_NATIVE.get(new_wi_status, "pending"),
+                "metadata": {"work_item_id": wid, "wi_status": new_wi_status},
+            }
+            for wid in wi_ids
+        ],
+    }
+
+
+def cmd_record(root, args):
+    if args.manifest_path:
+        manifest_path = (os.path.join(root, args.manifest_path)
+                         if not os.path.isabs(args.manifest_path)
+                         else args.manifest_path)
+        if not os.path.exists(manifest_path):
+            _err(1, "manifest_not_found", path=args.manifest_path)
+        with open(manifest_path, encoding="utf-8") as fh:
+            manifest = json.load(fh)
+        skip_phase1 = True
+    else:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            _err(1, "missing_manifest_input")
+        try:
+            manifest = json.loads(raw)
+        except json.JSONDecodeError as e:
+            _err(1, "invalid_json", detail=str(e))
+        skip_phase1 = False
+
+    # Validate required fields
+    required = ["id", "candidate_set_id", "work_item_ids", "candidate_branch",
+                "candidate_commit", "started_at", "finished_at", "status", "checks"]
+    missing = [f for f in required if f not in manifest]
+    if missing:
+        _err(1, "missing_required_fields", missing=missing)
+
+    valid_statuses = {"passed", "failed", "environment_error"}
+    if manifest["status"] not in valid_statuses:
+        _err(1, "invalid_manifest_status", value=manifest["status"],
+             valid=list(valid_statuses))
+
+    if not isinstance(manifest["work_item_ids"], list) or not manifest["work_item_ids"]:
+        _err(1, "work_item_ids_must_be_nonempty_list")
+
+    # Read state
+    wi_path = os.path.join(root, ".agent-atelier", "work-items.json")
+    loop_path = os.path.join(root, ".agent-atelier", "loop-state.json")
+    wi_store = read_json(wi_path)
+    loop_state = read_json(loop_path)
+
+    acs = loop_state.get("active_candidate_set")
+    if not acs:
+        _err(2, "no_active_candidate_set")
+    if manifest["candidate_set_id"] != acs.get("id"):
+        _err(2, "candidate_set_mismatch",
+             manifest=manifest["candidate_set_id"], active=acs.get("id"))
+    if set(manifest["work_item_ids"]) != set(acs.get("work_item_ids", [])):
+        _err(2, "work_item_ids_mismatch",
+             manifest=manifest["work_item_ids"], active=acs.get("work_item_ids"))
+    if manifest["candidate_branch"] != acs.get("branch"):
+        _err(2, "branch_mismatch")
+    if manifest["candidate_commit"] != acs.get("commit"):
+        _err(2, "commit_mismatch")
+
+    # Verify all WIs exist and are candidate_validating
+    items = list(wi_store.get("items", []))
+    found = {it.get("id"): (i, it) for i, it in enumerate(items)}
+    missing = [wid for wid in manifest["work_item_ids"] if wid not in found]
+    if missing:
+        _err(3, "work_items_not_found", missing=missing)
+    wrong = [{"id": wid, "status": found[wid][1].get("status")}
+             for wid in manifest["work_item_ids"]
+             if found[wid][1].get("status") != "candidate_validating"]
+    if wrong:
+        _err(2, "wi_not_candidate_validating", wrong=wrong)
+
+    # Verify evidence files (warn-only when empty per SKILL.md, hard-fail when missing)
+    evidence_refs = manifest.get("evidence_refs", [])
+    for ref in evidence_refs:
+        ref_path = os.path.join(root, ref) if not os.path.isabs(ref) else ref
+        if not os.path.exists(ref_path):
+            _err(1, "evidence_missing", path=ref)
+
+    run_id = manifest["id"]
+
+    # Phase 1: write manifest (unless using --manifest-path which already exists)
+    rel_manifest_path = f".agent-atelier/validation/{run_id}/manifest.json"
+    artifacts = []
+    if not skip_phase1:
+        manifest_dir = os.path.join(root, ".agent-atelier", "validation", run_id)
+        os.makedirs(manifest_dir, exist_ok=True)
+        out_path = os.path.join(manifest_dir, "manifest.json")
+        with open(out_path, "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh, indent=2, ensure_ascii=False)
+            fh.write("\n")
+        artifacts.append(rel_manifest_path)
+
+    # Phase 2: state-commit (depends on status)
+    status = manifest["status"]
+    if status == "environment_error":
+        output = {
+            "accepted": True,
+            "changed": False,
+            "run_id": run_id,
+            "manifest_status": "environment_error",
+            "artifacts": artifacts,
+        }
+        print(json.dumps(output, indent=2, ensure_ascii=False))
+        return
+
+    wi_ids = manifest["work_item_ids"]
+    if status == "passed":
+        for wid in wi_ids:
+            i, it = found[wid]
+            new_it = dict(it)
+            new_it["status"] = "reviewing"
+            new_it["revision"] = it.get("revision", 0) + 1
+            items[i] = new_it
+        new_wi_store = {
+            "revision": wi_store.get("revision", 0) + 1,
+            "updated_at": manifest.get("finished_at"),
+            "items": items,
+        }
+        tx = {"writes": [{
+            "path": ".agent-atelier/work-items.json",
+            "expected_revision": wi_store.get("revision"),
+            "content": new_wi_store,
+        }]}
+        run_state_commit(root, tx)
+        artifacts.append(".agent-atelier/work-items.json")
+
+        output = {
+            "accepted": True,
+            "committed_revision": new_wi_store["revision"],
+            "changed": True,
+            "run_id": run_id,
+            "manifest_status": "passed",
+            "artifacts": artifacts,
+            "native_task_sync": build_native_sync(wi_ids, "reviewing"),
+        }
+        print(json.dumps(output, indent=2, ensure_ascii=False))
+        return
+
+    # status == "failed" → atomic demotion + active set clear
+    for wid in wi_ids:
+        i, it = found[wid]
+        new_it = dict(it)
+        new_it["status"] = "ready"
+        promotion = dict(new_it.get("promotion") or {})
+        promotion["candidate_branch"] = None
+        promotion["candidate_commit"] = None
+        promotion["status"] = "not_ready"
+        new_it["promotion"] = promotion
+        new_it["revision"] = it.get("revision", 0) + 1
+        items[i] = new_it
+
+    new_wi_store = {
+        "revision": wi_store.get("revision", 0) + 1,
+        "updated_at": manifest.get("finished_at"),
+        "items": items,
+    }
+    new_loop = dict(loop_state)
+    new_loop["active_candidate_set"] = None
+    new_loop["revision"] = loop_state.get("revision", 0) + 1
+    new_loop["updated_at"] = manifest.get("finished_at")
+
+    tx = {"writes": [
+        {"path": ".agent-atelier/work-items.json",
+         "expected_revision": wi_store.get("revision"), "content": new_wi_store},
+        {"path": ".agent-atelier/loop-state.json",
+         "expected_revision": loop_state.get("revision"), "content": new_loop},
+    ]}
+    run_state_commit(root, tx)
+    artifacts.extend([".agent-atelier/work-items.json", ".agent-atelier/loop-state.json"])
+
+    output = {
+        "accepted": True,
+        "committed_revision": new_wi_store["revision"],
+        "changed": True,
+        "run_id": run_id,
+        "manifest_status": "failed",
+        "artifacts": artifacts,
+        "native_task_sync": build_native_sync(wi_ids, "ready"),
+    }
+    print(json.dumps(output, indent=2, ensure_ascii=False))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    p_rec = sub.add_parser("record")
+    p_rec.add_argument("--manifest-path", default=None,
+                       help="Read manifest from this path instead of stdin")
+
+    args = parser.parse_args()
+    root = resolve_root()
+    try:
+        if args.cmd == "record":
+            cmd_record(root, args)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        _err(4, "runtime_error", detail=str(exc))
+
+
+if __name__ == "__main__":
+    main()

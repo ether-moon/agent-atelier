@@ -173,8 +173,10 @@ JSON
   _assert_json "$V_OUT" "
 assert d.get('accepted') is True
 hint = d.get('native_task_sync')
-assert hint and hint.get('new_status') == 'in_progress'
-" "validate record (passed) returns native_task_sync new_status=in_progress"
+assert hint and hint.get('action') == 'update'
+targets = hint.get('targets') or []
+assert len(targets) == 1 and targets[0].get('new_status') == 'in_progress'
+" "validate record (passed) returns native_task_sync targets[0].new_status=in_progress"
   rm -rf "$TMP"
 fi
 
