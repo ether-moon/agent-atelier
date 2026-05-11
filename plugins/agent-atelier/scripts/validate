@@ -185,24 +185,31 @@ def cmd_record(root, args):
 
     run_id = manifest["id"]
 
-    # Phase 1: write manifest (unless using --manifest-path which already exists)
+    # Build a single atomic transaction: manifest write + WI status flip +
+    # (on failed) active_candidate_set clear. Mirrors the artifact-in-tx
+    # pattern from lifecycle.cmd_attempt so a crash mid-flight cannot leave
+    # an orphan manifest on disk without the corresponding state change.
     rel_manifest_path = f".agent-atelier/validation/{run_id}/manifest.json"
     artifacts = []
+    writes = []
     if not skip_phase1:
-        manifest_dir = os.path.join(root, ".agent-atelier", "validation", run_id)
-        os.makedirs(manifest_dir, exist_ok=True)
-        out_path = os.path.join(manifest_dir, "manifest.json")
-        with open(out_path, "w", encoding="utf-8") as fh:
-            json.dump(manifest, fh, indent=2, ensure_ascii=False)
-            fh.write("\n")
+        writes.append({
+            "path": rel_manifest_path,
+            "expected_revision": None,
+            "content": manifest,
+        })
         artifacts.append(rel_manifest_path)
 
-    # Phase 2: state-commit (depends on status)
     status = manifest["status"]
+    wi_ids = manifest["work_item_ids"]
+
     if status == "environment_error":
+        # Manifest is the only mutation; no WI status flip, no active set clear.
+        if writes:
+            run_state_commit(root, {"writes": writes})
         output = {
             "accepted": True,
-            "changed": False,
+            "changed": bool(writes),
             "run_id": run_id,
             "manifest_status": "environment_error",
             "artifacts": artifacts,
@@ -210,7 +217,6 @@ def cmd_record(root, args):
         print(json.dumps(output, indent=2, ensure_ascii=False))
         return
 
-    wi_ids = manifest["work_item_ids"]
     if status == "passed":
         for wid in wi_ids:
             i, it = found[wid]
@@ -223,12 +229,12 @@ def cmd_record(root, args):
             "updated_at": manifest.get("finished_at"),
             "items": items,
         }
-        tx = {"writes": [{
+        writes.append({
             "path": ".agent-atelier/work-items.json",
             "expected_revision": wi_store.get("revision"),
             "content": new_wi_store,
-        }]}
-        run_state_commit(root, tx)
+        })
+        run_state_commit(root, {"writes": writes})
         artifacts.append(".agent-atelier/work-items.json")
 
         output = {
@@ -243,7 +249,7 @@ def cmd_record(root, args):
         print(json.dumps(output, indent=2, ensure_ascii=False))
         return
 
-    # status == "failed" → atomic demotion + active set clear
+    # status == "failed" → atomic demotion + active set clear (+ manifest write)
     for wid in wi_ids:
         i, it = found[wid]
         new_it = dict(it)
@@ -266,13 +272,13 @@ def cmd_record(root, args):
     new_loop["revision"] = loop_state.get("revision", 0) + 1
     new_loop["updated_at"] = manifest.get("finished_at")
 
-    tx = {"writes": [
-        {"path": ".agent-atelier/work-items.json",
-         "expected_revision": wi_store.get("revision"), "content": new_wi_store},
-        {"path": ".agent-atelier/loop-state.json",
-         "expected_revision": loop_state.get("revision"), "content": new_loop},
-    ]}
-    run_state_commit(root, tx)
+    writes.append({"path": ".agent-atelier/work-items.json",
+                   "expected_revision": wi_store.get("revision"),
+                   "content": new_wi_store})
+    writes.append({"path": ".agent-atelier/loop-state.json",
+                   "expected_revision": loop_state.get("revision"),
+                   "content": new_loop})
+    run_state_commit(root, {"writes": writes})
     artifacts.extend([".agent-atelier/work-items.json", ".agent-atelier/loop-state.json"])
 
     output = {
