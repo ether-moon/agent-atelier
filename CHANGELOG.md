@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.2.0] - 2026-05-11
+
+### Added
+
+- **plan/execute workflow**: new `/agent-atelier:plan` and `/agent-atelier:execute` user-facing skills with mandatory ping-pong clarifying-question loop before IMPLEMENT (#15)
+- **state-commit IMPLEMENT gate**: mechanical enforcement — `mode: BUILD_PLAN → IMPLEMENT` transitions require matching `wi_plan_hash` and `spec_hash` in `plan_approval` (#15)
+- **`scripts/` directory**: `wi`, `lifecycle`, `gate`, `watchdog`, `candidate`, `validate`, `init-helpers.sh`, `_plan_hash.py` — 7 internal mechanical scripts emitting JSON with `native_task_sync` hints (#15)
+- **schemas**: `clarifying-question.schema.json` and `plan-conversation-entry.schema.json` (#15)
+- **state fields**: `loop-state.json` gains `plan_approval`, `active_plan_cycle_id`, `plan_gate`; `watchdog-jobs.json` gains plan-budget defaults (#15)
+- **`references/monitor-runtime.md`**: LLM-driven monitor procedure delegated from the `monitors` shim (#15)
+- **scenario tests**: 9 end-to-end state-level integration tests (`plan_only`, `execute_no_plan`, `execute_with_valid_plan`, `plan_invalidated`, `pingpong_basic/modify/assume/budget`, `cold_resume_pingpong`) plus `script_contracts.sh`, `plan_hash_test.sh`, `implement_gate_test.sh`, `init_helpers_test.sh` — 70 tests total (#15)
+
+### Improved
+
+- **user surface simplification**: skill discovery now lists only `plan`, `execute`, `status` (user-facing) + `monitors` (internal shim) instead of the previous 10 slash commands (#15)
+- **PM / Architect prompts**: must surface uncertainty as `ClarifyingQuestion` during plan phases; signal `no_more_questions` at round end (#15)
+- **Orchestrator prompt**: hosts the ping-pong loop, batches up to 3 questions per `AskUserQuestion` call, enforces 30-question budget in real time, is the sole writer of `plan-conversations/<cycle-id>.jsonl` (#15)
+- **`init-helpers.sh`**: migrates existing installs by merging missing top-level state keys (no overwrite, no nested touch) (#15)
+- **status dashboard**: surfaces Plan State section with hash-match check and recent ping-pong activity (#15)
+
+### Fixed
+
+- **`scripts/watchdog`**: aborts tick when WAL replay fails instead of operating on partially recovered state (#15)
+- **`scripts/candidate`**: revalidates queued WI status on activation; preserves `done` WIs during demotion (#15)
+- **`scripts/gate`**: validates `blocked_work_items` before rebinding, rejecting unknown WIs and double-bindings (#15)
+- **`scripts/wi`**: clears stale `blocked_by_gate` link whenever status is not `blocked_on_human_gate` (#15)
+- **`scripts/lifecycle`**: removes unreachable lease-check code after status guard (#15)
+- **`scripts/validate`**: folds manifest write into the state-commit transaction for true atomicity (#15)
+- **`scripts/init-helpers.sh`**: emits the documented `wal_recovered` field; drops unused `--migrate-only` flag (#15)
+
 ## [0.1.5] - 2026-05-07
 
 ### Fixed
