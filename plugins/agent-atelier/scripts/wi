@@ -186,12 +186,9 @@ def _normalize(wi, existing):
         wi["last_heartbeat_at"] = None
         wi["lease_expires_at"] = None
 
-    # Rule 5: Gate field tied to status
-    if wi.get("status") != "blocked_on_human_gate" and "blocked_by_gate" not in wi:
+    # Rule 5: Gate field tied to status — clear unconditionally when not blocked.
+    if wi.get("status") != "blocked_on_human_gate":
         wi["blocked_by_gate"] = None
-    elif wi.get("status") != "blocked_on_human_gate":
-        # If caller didn't explicitly set, clear; if they did, keep
-        pass
 
     # Rule 7: Complexity validation
     cmplx = wi.get("complexity")

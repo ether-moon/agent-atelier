@@ -142,14 +142,6 @@ def cmd_claim(root, args):
     if wi.get("status") != "ready":
         _err(2, "wrong_status", expected="ready", actual=wi.get("status"))
 
-    # Check lease (if existing)
-    lease = wi.get("lease_expires_at")
-    if lease and wi.get("status") == "implementing":
-        # Already implementing — lease check
-        if lease > _now_z():
-            _err(2, "lease_held", lease_expires_at=lease,
-                 current_owner=wi.get("owner_session_id"))
-
     now = _now_z()
     lease_minutes = args.lease_minutes
     expires = (datetime.datetime.now(datetime.timezone.utc)
