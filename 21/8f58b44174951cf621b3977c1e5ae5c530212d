@@ -1,0 +1,22 @@
+## Decisions Made
+- Reject unknown WI IDs and cross-gate conflicts as separate errors (`work_items_not_found` exit 3, `wi_already_blocked_by_other_gate` exit 2) so the orchestrator can distinguish typo from contention.
+- Place validation immediately after reading wi_store and before constructing the gate header so no partial state is written when the rejection fires.
+
+## Problems Encountered
+- None — the gate file uses a simple index map for lookup; validation slots in naturally.
+
+## Constraints Identified
+- `cmd_open` is the sole writer that opens gates; this validation does not need to be repeated in `cmd_resolve` (which works on already-validated state).
+- The `blocked_by_gate` check excludes self-references (`== hdr_id`) so re-opening the same gate ID is not considered a conflict, matching the existing idempotency expectations.
+
+## Open Questions
+- None.
+
+## Context
+Fourth commit of CodeRabbit PR #15 resolution. MAJOR fix in `scripts/gate.cmd_open`. All 70 tests pass.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
