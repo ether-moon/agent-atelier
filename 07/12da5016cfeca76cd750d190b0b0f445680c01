@@ -1,0 +1,22 @@
+## Decisions Made
+- Apply all CodeRabbit OBVIOUS items in grouped commits per logical cluster: docs polish lands first as smallest blast radius.
+- Use `text` language tag for narrative-style fenced blocks and `bash` for shell-snippet blocks per CodeRabbit's example pattern.
+
+## Problems Encountered
+- Direct `git commit` was blocked by pre-commit-memento hook on first attempt: resolved by invoking memento-commit skill flow.
+
+## Constraints Identified
+- Project enforces memento-commit workflow via PreToolUse hook on Bash — every commit must go through this skill to attach a git note on `refs/notes/commits`.
+- Markdownlint MD040 requires language identifiers on all fenced code blocks for clean docs CI.
+
+## Open Questions
+- None for this commit; remaining 13 CodeRabbit items will land in subsequent commits.
+
+## Context
+First commit of CodeRabbit PR #15 resolution. Cluster doc-only polish: AGENTS.md wording scope, MD040 fence tags on design spec, and CLAUDE_PLUGIN_ROOT consistency in status SKILL.md. Three files, 7 insertions / 7 deletions, no behavioral change.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
