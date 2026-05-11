@@ -1,0 +1,22 @@
+## Decisions Made
+- Map `stale_revision` from state-commit to exit code 2 and other replay failures to exit 4, matching the existing watchdog exit-code semantics (2 = stale revision after retries, 4 = IO/runtime).
+- Surface the state-commit `reason` + stderr in the error payload so the orchestrator can route the failure (retry vs. escalate).
+
+## Problems Encountered
+- None — `_err` helper already existed and is the canonical exit-with-JSON path for watchdog.
+
+## Constraints Identified
+- WAL replay failure can mask other state corruption (e.g., a half-written transaction), so the watchdog tick must not proceed past replay without an exit-0 confirmation. Continuing on partial state risks emitting duplicate alerts or double-applying transitions.
+- The `_err` helper already JSON-encodes the payload, so passing `detail=detail` and `stderr=replay.stderr` preserves the structured shape consumers expect.
+
+## Open Questions
+- None.
+
+## Context
+Sixth commit of CodeRabbit PR #15 resolution. MAJOR fix in `scripts/watchdog.cmd_tick`. All 70 tests pass.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
