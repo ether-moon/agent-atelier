@@ -112,11 +112,23 @@ def cmd_tick(root, _args):
     if not (os.path.exists(wi_path) and os.path.exists(loop_path) and os.path.exists(wd_path)):
         _err(3, "state_files_missing")
 
-    # WAL replay first
+    # WAL replay first — abort the tick if replay fails so we do not
+    # operate on stale or partially recovered state.
     wal = os.path.join(state_dir, ".pending-tx.json")
     if os.path.exists(wal):
-        subprocess.run([state_commit_path(), "--root", root, "--replay"],
-                       capture_output=True, text=True)
+        replay = subprocess.run(
+            [state_commit_path(), "--root", root, "--replay"],
+            capture_output=True, text=True,
+        )
+        if replay.returncode != 0:
+            try:
+                detail = json.loads(replay.stdout) if replay.stdout else {}
+            except json.JSONDecodeError:
+                _err(4, "state_commit_unparseable_output",
+                     stdout=replay.stdout, stderr=replay.stderr)
+            reason = detail.get("reason", "wal_replay_failed")
+            _err(2 if reason == "stale_revision" else 4, reason,
+                 detail=detail, stderr=replay.stderr)
 
     wi_store = read_json(wi_path)
     loop_state = read_json(loop_path)
