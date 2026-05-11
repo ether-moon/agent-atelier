@@ -5,7 +5,7 @@ agent-atelier — Autonomous product development loop — AI agent team that cyc
 ## Plugin Structure
 
 - `plugins/agent-atelier/skills/` — 4 skills total: `plan`, `execute`, `status` (user-facing) + `monitors` (internal shim invoked by orchestrator/cron)
-- `plugins/agent-atelier/scripts/` — Mechanical commands invoked by orchestrator and roles: `state-commit`, `init-helpers.sh`, `wi`, `lifecycle`, `gate`, `watchdog`, `candidate`, `validate`, `_plan_hash.py`. All emit JSON; mutating scripts include `native_task_sync` hint.
+- `plugins/agent-atelier/scripts/` — Mechanical commands invoked by orchestrator and roles: `state-commit`, `init-helpers.sh`, `wi`, `lifecycle`, `gate`, `watchdog`, `candidate`, `validate`, `_plan_hash.py`. All emit JSON; `native_task_sync` hints are emitted only at the documented WI sync points (`scripts/wi upsert`, `scripts/lifecycle claim/requeue/complete`, `scripts/candidate clear --demoted`).
 - `plugins/agent-atelier/hooks/` — Lifecycle hooks (unchanged composition)
 - `plugins/agent-atelier/schema/` — `vrm-evidence-input.schema.json`, `clarifying-question.schema.json`, `plan-conversation-entry.schema.json`
 - `plugins/agent-atelier/references/` — paths, state-defaults, wi-schema, recovery-protocol, success-metrics-routing, monitor-runtime

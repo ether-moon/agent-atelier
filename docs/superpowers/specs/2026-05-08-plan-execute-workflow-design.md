@@ -15,7 +15,7 @@
 
 ## 사용자 멘탈 모델
 
-```
+```text
 /agent-atelier:plan      ← 계획만 (선택적)
 /agent-atelier:execute   ← 끝까지 실행 (필수 게이트 포함)
 ```
@@ -68,7 +68,7 @@
 
 `work-items.json` revision은 IMPLEMENT 단계의 status 전환마다 bump되므로 무효화 trigger로 부적합. 대신 **plan 차원 필드만** hash:
 
-```
+```text
 wi_plan_hash = sha256( canonicalized JSON of:
   [ {id, title, description, depends_on, owned_paths, verify, complexity, status_class}
     for wi in items, sorted by id ] )
@@ -254,7 +254,7 @@ JSONL 한 라인 = 한 이벤트. 세션 재시작 시 `loop-state.active_plan_c
 
 모든 phase가 "질문 없음" 상태로 안정화되면 BUILD_PLAN 종료 시 통합 리뷰 한 번:
 
-```
+```text
 === Plan Stable. Ready for Implementation? ===
 Spec: 12 behaviors (3 added/changed during plan)
 WIs:  5 ready (complexity S:2 / M:2 / L:1, 모두 verify ≥1)
@@ -407,12 +407,12 @@ This skill is invoked **only** by the orchestrator or cron jobs. Users should no
 ### tests/all.sh 갱신
 
 현재 하드코딩된 expected list (10개 skill — 이전 사양은 9개로 잘못 적혀 있었음):
-```
+```bash
 EXPECTED_SKILLS="init status wi execute gate watchdog candidate validate run monitors"
 ```
 
 변경 후 (사용자 진입점 3 + monitors shim):
-```
+```bash
 EXPECTED_SKILLS="plan execute status monitors"
 EXPECTED_SCRIPTS="state-commit init-helpers.sh wi gate watchdog candidate validate lifecycle"
 EXPECTED_REFERENCES="paths.md state-defaults.md wi-schema.md recovery-protocol.md success-metrics-routing.md monitor-runtime.md"

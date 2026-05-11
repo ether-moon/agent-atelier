@@ -44,7 +44,7 @@ argument-hint: ""
 
    If `active_plan_cycle_id` is non-null, read the last 3 lines of `.agent-atelier/plan-conversations/<cycle-id>.jsonl` (most recent ping-pong activity).
 
-   If `plan_approval` is non-null, recompute current `wi_plan_hash` (over `work-items.json` items via `${plugin_root}/scripts/_plan_hash.py`) and `spec_hash` of `docs/product/behavior-spec.md`. Compare to stored values.
+   If `plan_approval` is non-null, recompute current `wi_plan_hash` (over `work-items.json` items via `${CLAUDE_PLUGIN_ROOT}/scripts/_plan_hash.py`) and `spec_hash` of `docs/product/behavior-spec.md`. Compare to stored values.
 
 5. **Derive next action.** Determine what the orchestrator should do next based on state:
    - `active_plan_cycle_id` non-null with `plan_gate` open → "resume plan cycle (last activity: <type> <round>)"
