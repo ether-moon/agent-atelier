@@ -1,0 +1,23 @@
+## Decisions Made
+- Schema: apply only the structural quick-win (`minItems: 1`) and document the cross-field invariant in the property description. Skip the orchestrator-side runtime enforcement — that's a separate design choice (where to enforce, what error to emit).
+- Tests/execute_no_plan: introduce `BASE_REV` and `NEXT_REV` shell variables right after reading the loop-state file. Pipes them through the heredoc Python via `$BASE_REV` expansion (heredoc is unquoted so expansion happens).
+- Tests/implement_gate: update both TX2 and TX3 to use `$EXPECTED_SPEC_HASH`. TX3 still passes because the `wi_plan_hash` is the deliberate mismatch; spec_hash being correct narrows the test to assert exactly what it advertises.
+
+## Problems Encountered
+- TX3 in implement_gate_test.sh originally hardcoded `"spec_hash":"null"` and relied on the spec_hash() fallback string. While the test still passed, this masked the test intent. Replacing the literal with the variable made the assertion explicit.
+
+## Constraints Identified
+- JSON Schema draft-07 cannot express "value of field X must be one of items in array Y" without code generation or schema composition tricks. The chosen path (description-only invariant + future runtime check) avoids tooling churn while documenting intent.
+- The `spec_hash()` helper returns the string `"null"` when the file is missing, so `EXPECTED_SPEC_HASH=$(python3 -c "...")` resolves to `"null"` for tests that don't create behavior-spec.md — behavior is identical to the previous literal, but now traceable to the actual helper.
+
+## Open Questions
+- Orchestrator-side runtime enforcement of `recommended ∈ options[]` — where should it fire (CQ parse time? Builder dispatch time?), and what user-facing error should surface? Tracked in the schema's property description until a follow-up change addresses it.
+
+## Context
+Eighth (final) commit of CodeRabbit PR #15 resolution. Schema MINOR (recommended/options invariant + minItems) and two test improvements (dynamic revision read, spec_hash computation). All 70 tests pass.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
