@@ -1,0 +1,22 @@
+## Decisions Made
+- Replace the mixed if/elif in `wi` Rule 5 with a single unconditional clear when status != "blocked_on_human_gate" — CodeRabbit's proposed fix is the canonical reading; callers no longer need to opt-in to clearing.
+- Remove the dead lease-held branch in `lifecycle.cmd_claim` rather than restructure the status guard — the recovery protocol explicitly routes `implementing` reclaim through requeue+claim, not claim directly.
+
+## Problems Encountered
+- None — both edits were mechanical CodeRabbit-suggested fixes verified against the surrounding control flow.
+
+## Constraints Identified
+- `cmd_claim` accepts only WIs in `ready` status by design; the recovery-protocol startup resume sweep is responsible for any lease reclamation path on `implementing` WIs.
+- Gate-link cleanup must run on every non-blocked status transition, including BUILD_PLAN, SPEC_HARDEN, and DISCOVER phases that touch WIs without setting `blocked_by_gate`.
+
+## Open Questions
+- None.
+
+## Context
+Second commit of CodeRabbit PR #15 resolution. Two scripts/* correctness fixes: wi gate-link clearing (MAJOR) and lifecycle dead-code removal (MINOR). Verified all 70 tests pass after the change.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
