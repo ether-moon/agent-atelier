@@ -166,6 +166,24 @@ def cmd_open(root, args):
     wi_store = read_json(wi_path)
     loop_state = read_json(loop_path)
 
+    # Validate blocked_work_items before mutating wi_store so typoed payloads
+    # cannot create dangling gate references, and a second gate cannot orphan
+    # the first gate's linkage on the same WI.
+    if blocked_wis:
+        existing_items = wi_store.get("items", [])
+        item_index = {it.get("id"): it for it in existing_items}
+        unknown = [wid for wid in blocked_wis if wid not in item_index]
+        if unknown:
+            _err(3, "work_items_not_found", missing=unknown)
+        conflicting = [
+            {"id": wid, "blocked_by_gate": item_index[wid].get("blocked_by_gate")}
+            for wid in blocked_wis
+            if item_index[wid].get("blocked_by_gate")
+            and item_index[wid].get("blocked_by_gate") != hdr_id
+        ]
+        if conflicting:
+            _err(2, "wi_already_blocked_by_other_gate", conflicting=conflicting)
+
     hdr = {
         "id": hdr_id,
         "created_at": now,
