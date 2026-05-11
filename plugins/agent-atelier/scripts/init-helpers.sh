@@ -2,7 +2,7 @@
 # init-helpers.sh — Bootstrap and migrate orchestration state files.
 #
 # Usage:
-#   init-helpers.sh [--root <path>] [--migrate-only]
+#   init-helpers.sh [--root <path>]
 #
 # Output: JSON to stdout: {"changed": bool, "created": [...], "migrated_keys": {...}, "wal_recovered": bool}
 # Exit codes: 0 success, 3 no git root, 4 IO failure.
@@ -10,11 +10,9 @@
 set -euo pipefail
 
 ROOT=""
-MIGRATE_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) ROOT="$2"; shift 2;;
-    --migrate-only) MIGRATE_ONLY=1; shift;;
     *) echo "unknown arg: $1" >&2; exit 1;;
   esac
 done
@@ -30,11 +28,25 @@ mkdir -p "$STATE_DIR/human-gates/open" "$STATE_DIR/human-gates/resolved" "$STATE
 
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
+# WAL replay first so the wal_recovered field can be emitted in the composite
+# JSON below. (The previous ordering printed JSON before replay, so consumers
+# saw the documented wal_recovered field as undefined.)
+WAL="$STATE_DIR/.pending-tx.json"
+WAL_RECOVERED=false
+if [ -f "$WAL" ]; then
+  if "$PLUGIN_ROOT/scripts/state-commit" --root "$ROOT" --replay >/dev/null 2>&1; then
+    WAL_RECOVERED=true
+  fi
+fi
+
 # Extract default JSON blocks from state-defaults.md and merge missing top-level keys
-python3 - "$PLUGIN_ROOT" "$STATE_DIR" "$NOW" <<'PYEOF'
+python3 - "$PLUGIN_ROOT" "$STATE_DIR" "$NOW" "$WAL_RECOVERED" <<'PYEOF'
 import sys, os, re, json
 
-plugin_root, state_dir, now = sys.argv[1], sys.argv[2], sys.argv[3]
+plugin_root, state_dir, now, wal_recovered_arg = (
+    sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4],
+)
+wal_recovered = wal_recovered_arg == "true"
 defaults_path = os.path.join(plugin_root, "references", "state-defaults.md")
 
 # Parse JSON blocks under "## <filename>" headers
@@ -46,7 +58,12 @@ for m in re.finditer(r'^## ([\w.-]+\.json)\s*\n+```json\n(.*?)\n```', text, re.M
     name, body = m.group(1), m.group(2).replace('"<now>"', f'"{now}"')
     blocks[name] = json.loads(body)
 
-results = {"changed": False, "created": [], "migrated_keys": {}}
+results = {
+    "changed": False,
+    "created": [],
+    "migrated_keys": {},
+    "wal_recovered": wal_recovered,
+}
 
 for name, default_obj in blocks.items():
     if name == "human-decision-request.json":
@@ -90,13 +107,3 @@ if not os.path.exists(index_path):
 
 print(json.dumps(results, ensure_ascii=False))
 PYEOF
-
-# WAL replay
-WAL="$STATE_DIR/.pending-tx.json"
-WAL_RECOVERED=false
-if [ -f "$WAL" ]; then
-  "$PLUGIN_ROOT/scripts/state-commit" --root "$ROOT" --replay >/dev/null 2>&1 && WAL_RECOVERED=true || true
-fi
-
-# Final summary (init-helpers prints its own JSON; orchestration consumers parse)
-# (The python block above already wrote results to stdout.)
