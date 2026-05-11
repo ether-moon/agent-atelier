@@ -1,0 +1,20 @@
+## Decisions Made
+- 0.1.5 → 0.2.0 (minor bump): 0.x semver 관례 — pre-1.0이므로 breaking surface 변경(init/run → plan/execute)도 minor에 허용. 변경 규모는 큼(70 tests, 7 scripts, 4 user-facing skills 재정의)이지만 1.0 promotion은 별도 명시적 결정 필요.
+
+## Problems Encountered
+- None
+
+## Constraints Identified
+- pre-commit-memento.sh 훅이 direct git commit 차단 → memento 패턴 의무
+
+## Open Questions
+- None
+
+## Context
+PR #15 (plan/execute 워크플로우) 머지 후 origin/main 기준 version bump. CHANGELOG.md 갱신 — Added/Improved/Fixed 3개 카테고리에 #15 변경분 정리. plugin.json version 필드만 변경.
+
+## Recorded Decisions
+- None
+
+## Vault Entries Referenced
+- None
