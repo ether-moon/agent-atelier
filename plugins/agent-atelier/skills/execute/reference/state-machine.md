@@ -140,7 +140,7 @@ On cold resume, the Orchestrator reads this file to restore review state. If a W
 All WIs complete with evidence. Execute the team cleanup checklist in order:
 
 1. **Verify completion:** Confirm all WIs have status `done` and `active_candidate_set` is null.
-2. **Stop monitors:** Stop all monitors via `/agent-atelier:monitors stop all`.
+2. **Stop monitors:** Stop all monitors via `/agent-atelier:monitors stop all` (the `monitors` skill remains a thin shim — see `../../../references/monitor-runtime.md`).
 3. **Cancel cron jobs:** `CronDelete` both the stored monitor poll job ID and the stored watchdog recovery job ID.
 4. **Shutdown teammates:** Send `SendMessage({type: "shutdown_request"})` to each active teammate. Wait for all to reach idle/stopped state.
 5. **Clean up team:** Call `TeamDelete` to remove team resources. **Only the lead (Orchestrator) may run cleanup** -- teammates running cleanup can leave resources inconsistent.

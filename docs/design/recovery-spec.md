@@ -89,7 +89,7 @@ When the runtime starts after interruption:
 5. inspect work items for expired leases
 6. inspect git branches / worktrees for committed candidate state
 7. apply mechanical recovery where allowed
-8. start `/agent-atelier:run`, which recreates the monitor poll cron, the watchdog recovery cron, and one startup resume sweep over the recovered state
+8. start `/agent-atelier:execute`, which recreates the monitor poll cron, the watchdog recovery cron, and one startup resume sweep over the recovered state
 9. emit a resume summary
 10. let Orchestrator choose the next action from the recovered state
 

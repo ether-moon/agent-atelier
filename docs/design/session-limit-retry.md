@@ -101,7 +101,7 @@ The existing state already contains the information needed for recovery:
 
 The 15-minute lane must do both:
 
-1. run `/agent-atelier:watchdog tick`
+1. run `bash <plugin-root>/scripts/watchdog tick`
 2. run an Orchestrator-owned resume sweep
 
 The watchdog remains mechanical and state-focused. The Orchestrator remains responsible for routing, respawning, and re-dispatch.
@@ -110,9 +110,9 @@ The watchdog remains mechanical and state-focused. The Orchestrator remains resp
 
 ## 6. Runtime Topology
 
-### 6.1 `run` Phase 2 Contract
+### 6.1 `execute` Phase 2 Contract
 
-`plugins/agent-atelier/skills/run/SKILL.md` should be tightened so Phase 2 explicitly does:
+`plugins/agent-atelier/skills/execute/SKILL.md` should be tightened so Phase 2 explicitly does:
 
 1. spawn monitors
 2. create monitor poll CronCreate job
@@ -121,13 +121,13 @@ The watchdog remains mechanical and state-focused. The Orchestrator remains resp
 
 Cleanup must explicitly delete both cron jobs.
 
-The run skill currently documents the 15-minute watchdog concept but does not operationally define the second CronCreate handle. This is the primary design gap.
+The execute skill currently documents the 15-minute watchdog concept but does not operationally define the second CronCreate handle. This is the primary design gap.
 
 ### 6.2 Suggested Watchdog Pulse Prompt
 
 The prompt injected by the 15-minute CronCreate lane should instruct the lead to:
 
-1. run `/agent-atelier:watchdog tick`
+1. run `bash <plugin-root>/scripts/watchdog tick`
 2. read current `loop-state.json` and `work-items.json`
 3. perform the resume sweep defined in Section 7
 4. stay silent if no recovery or dispatch action is needed
@@ -232,8 +232,8 @@ then the Orchestrator should emit no visible message.
 If the lead session dies before or outside the cron-based recovery pulse, this design does not help. The answer remains:
 
 - run cold resume
-- start `/agent-atelier:run`, which recreates monitors and both cron jobs
-- let `/agent-atelier:run` perform the one-time startup resume sweep for stranded `implementing` work
+- start `/agent-atelier:execute`, which recreates monitors and both cron jobs
+- let `/agent-atelier:execute` perform the one-time startup resume sweep for stranded `implementing` work
 
 Session-limit retry is an in-session resilience layer, not a replacement for crash recovery.
 
@@ -252,7 +252,7 @@ Without this rule, session-limit retry conflicts with the 90-minute default Buil
 
 The design should be merged into these normative documents during implementation:
 
-- `plugins/agent-atelier/skills/run/SKILL.md`
+- `plugins/agent-atelier/skills/execute/SKILL.md`
   - explicitly create the second CronCreate job
   - explicitly clean up both job ids
   - define the watchdog pulse prompt contract
@@ -264,7 +264,7 @@ The design should be merged into these normative documents during implementation
   - allow early requeue when the owner is unavailable after a recovery pulse
 - `docs/design/recovery-spec.md`
   - add session-limit recovery as a separate recovery class
-- `plugins/agent-atelier/skills/watchdog/SKILL.md`
+- `plugins/agent-atelier/scripts/watchdog`
   - clarify that watchdog tick is the mechanical half of a larger recovery pulse, not the full resumption logic by itself
 
 No schema document change is required.

@@ -75,7 +75,7 @@ PY
 
 if [[ -n "$REVIEWING_WITHOUT_EVIDENCE" ]]; then
   echo "BLOCKED: Completion without evidence: $REVIEWING_WITHOUT_EVIDENCE"
-  echo "Use '/agent-atelier:execute complete' with validation manifest and evidence refs."
+  echo "Use 'bash \${CLAUDE_PLUGIN_ROOT}/scripts/lifecycle complete' with validation manifest and evidence refs."
   exit 2
 fi
 

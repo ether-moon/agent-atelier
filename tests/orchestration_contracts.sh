@@ -6,9 +6,9 @@ BUILD_VRM="$ROOT/plugins/agent-atelier/scripts/build-vrm-prompt"
 HOOK="$ROOT/plugins/agent-atelier/hooks/on-task-completed.sh"
 PROMPT_HOOK="$ROOT/plugins/agent-atelier/hooks/on-prompt.sh"
 SCHEMA="$ROOT/plugins/agent-atelier/schema/vrm-evidence-input.schema.json"
-RUN_SKILL="$ROOT/plugins/agent-atelier/skills/run/SKILL.md"
-MONITORS_SKILL="$ROOT/plugins/agent-atelier/skills/monitors/SKILL.md"
 EXECUTE_SKILL="$ROOT/plugins/agent-atelier/skills/execute/SKILL.md"
+MONITOR_RUNTIME="$ROOT/plugins/agent-atelier/references/monitor-runtime.md"
+LIFECYCLE_SCRIPT="$ROOT/plugins/agent-atelier/scripts/lifecycle"
 
 PASS=0
 FAIL=0
@@ -186,11 +186,11 @@ else
 fi
 
 # ── Test 6: Fast-track instructions are consistent across docs ──────
-if grep -q 'ci_status` (success) → evaluate fast-track, then transition to IMPLEMENT or REVIEW_SYNTHESIS' "$RUN_SKILL" \
-  && grep -q 'ci_status` (success) → evaluate fast-track, then transition to IMPLEMENT or REVIEW_SYNTHESIS' "$MONITORS_SKILL"; then
-  pass "Run and monitors docs agree on fast-track handling"
+if grep -q 'ci_status` (success) → evaluate fast-track, then transition to IMPLEMENT or REVIEW_SYNTHESIS' "$EXECUTE_SKILL" \
+  && grep -q 'ci_status` (success) -- evaluate fast-track, then transition to IMPLEMENT or REVIEW_SYNTHESIS' "$MONITOR_RUNTIME"; then
+  pass "Execute skill and monitor-runtime reference agree on fast-track handling"
 else
-  fail "Run and monitors docs disagree on fast-track handling"
+  fail "Execute skill and monitor-runtime reference disagree on fast-track handling"
 fi
 
 # ── Test 7: on-prompt reports active_candidate_set, not legacy field ─
@@ -219,12 +219,13 @@ else
   fail "Prompt hook still reports legacy active_candidate signal"
 fi
 
-# ── Test 8: execute complete no longer accepts candidate_validating ──
-if grep -q 'For `complete`: work item must be in `reviewing` status' "$EXECUTE_SKILL" \
-  && ! grep -q 'reviewing` or `candidate_validating' "$EXECUTE_SKILL"; then
-  pass "Execute skill restricts completion to reviewing state"
+# ── Test 8: lifecycle complete no longer accepts candidate_validating ─
+if grep -q 'expected="reviewing"' "$LIFECYCLE_SCRIPT" \
+  && ! grep -q 'expected="candidate_validating"' "$LIFECYCLE_SCRIPT" \
+  && ! grep -q 'reviewing` or `candidate_validating' "$LIFECYCLE_SCRIPT"; then
+  pass "Lifecycle script restricts completion to reviewing state"
 else
-  fail "Execute skill still allows completion from candidate_validating"
+  fail "Lifecycle script still allows completion from candidate_validating"
 fi
 
 echo ""

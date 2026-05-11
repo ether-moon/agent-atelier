@@ -19,7 +19,10 @@ When initializing state files, use these exact defaults. Timestamps should be UT
     "owner": "orchestrator",
     "type": "draft_first_work_item",
     "target": null
-  }
+  },
+  "plan_approval": null,
+  "active_plan_cycle_id": null,
+  "plan_gate": null
 }
 ```
 
@@ -43,7 +46,10 @@ When initializing state files, use these exact defaults. Timestamps should be UT
     "implementing_timeout_minutes": 90,
     "candidate_timeout_minutes": 30,
     "review_timeout_minutes": 30,
-    "gate_warn_after_hours": 24
+    "gate_warn_after_hours": 24,
+    "plan_question_budget": 30,
+    "plan_question_warn_at": 25,
+    "plan_user_response_timeout_hours": 24
   },
   "budgets": {
     "max_wall_clock_minutes_per_wi": 480,

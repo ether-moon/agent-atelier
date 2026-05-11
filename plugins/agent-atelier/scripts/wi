@@ -1,0 +1,345 @@
+#!/usr/bin/env python3
+"""
+wi — Work item planning script.
+
+Subcommands:
+  list                  List all work items (JSON to stdout).
+  show <WI-ID>          Show a single work item (full JSON).
+  upsert <json>         Create or update a work item. JSON via positional arg or stdin.
+
+Mutating commands route writes through state-commit for the single-writer guarantee.
+On successful upsert, stdout includes a `native_task_sync` hint for the caller
+(Orchestrator/State Manager) to execute as TaskCreate or TaskUpdate.
+
+Exit codes:
+  0 success
+  1 usage / invalid input / validation error
+  2 stale revision
+  3 not found
+  4 IO / runtime error
+"""
+
+import argparse
+import datetime
+import json
+import os
+import subprocess
+import sys
+
+
+# ── Status mapping (per AGENTS.md) ──────────────────────────────────
+WI_STATUS_TO_NATIVE = {
+    "pending": "pending",
+    "ready": "pending",
+    "blocked_on_human_gate": "pending",
+    "implementing": "in_progress",
+    "candidate_queued": "in_progress",
+    "candidate_validating": "in_progress",
+    "reviewing": "in_progress",
+    "done": "completed",
+}
+
+ARRAY_FIELDS = (
+    "non_goals", "decision_rationale", "relevant_constraints",
+    "success_metric_refs", "depends_on", "behaviors", "input_artifacts",
+    "owned_paths", "verify",
+)
+
+WI_DEFAULTS = {
+    "revision": 0,
+    "behavior_spec_revision": 1,
+    "title": "",
+    "why_now": "",
+    "non_goals": [],
+    "decision_rationale": [],
+    "relevant_constraints": [],
+    "success_metric_refs": [],
+    "owner_role": "builder",
+    "owner_session_id": None,
+    "depends_on": [],
+    "complexity": None,
+    "behaviors": [],
+    "input_artifacts": [],
+    "owned_paths": [],
+    "verify": [],
+    "status": "pending",
+    "blocked_by_gate": None,
+    "resume_target": None,
+    "first_claimed_at": None,
+    "handoff_count": 0,
+    "attempt_count": 0,
+    "last_heartbeat_at": None,
+    "lease_expires_at": None,
+    "stale_requeue_count": 0,
+    "last_attempt_ref": None,
+    "last_finding_fingerprint": None,
+    "promotion": {
+        "candidate_branch": None,
+        "candidate_commit": None,
+        "status": "not_ready",
+    },
+    "completion": None,
+}
+
+VALID_STATUSES = {
+    "pending", "ready", "implementing", "candidate_queued",
+    "candidate_validating", "reviewing", "blocked_on_human_gate", "done",
+}
+
+VALID_COMPLEXITY = {None, "simple", "complex"}
+
+
+def _now_z():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _err(code, msg, **extra):
+    payload = {"accepted": False, "error": msg}
+    payload.update(extra)
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    sys.exit(code)
+
+
+def resolve_root():
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        return os.path.realpath(out)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return os.path.realpath(os.getcwd())
+
+
+def state_commit_path():
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)), "state-commit")
+
+
+def read_store(root):
+    path = os.path.join(root, ".agent-atelier", "work-items.json")
+    if not os.path.exists(path):
+        _err(4, "work-items.json not found — run init-helpers.sh first", path=path)
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def cmd_list(root, _args):
+    store = read_store(root)
+    out = {
+        "revision": store.get("revision"),
+        "items": [
+            {
+                "id": it.get("id"),
+                "title": it.get("title", ""),
+                "status": it.get("status", "pending"),
+                "owner_session_id": it.get("owner_session_id"),
+            }
+            for it in store.get("items", [])
+        ],
+    }
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+
+
+def cmd_show(root, args):
+    store = read_store(root)
+    wi_id = args.id
+    for it in store.get("items", []):
+        if it.get("id") == wi_id:
+            print(json.dumps(it, indent=2, ensure_ascii=False))
+            return
+    available = [it.get("id") for it in store.get("items", [])]
+    _err(3, "work_item_not_found", requested=wi_id, available=available)
+
+
+def _merge_wi(existing, payload):
+    """Defaults → existing → payload."""
+    merged = json.loads(json.dumps(WI_DEFAULTS))  # deep copy
+    if existing:
+        for k, v in existing.items():
+            merged[k] = v
+    for k, v in payload.items():
+        merged[k] = v
+    return merged
+
+
+def _normalize(wi, existing):
+    # Rule 2: Array fields
+    for f in ARRAY_FIELDS:
+        v = wi.get(f)
+        if v is None:
+            wi[f] = []
+        elif not isinstance(v, list):
+            _err(1, f"field_must_be_array: {f}", field=f, value=v)
+
+    # Rule 3: Promotion object
+    promotion = wi.get("promotion") or {}
+    if not isinstance(promotion, dict):
+        promotion = {}
+    promotion.setdefault("candidate_branch", None)
+    promotion.setdefault("candidate_commit", None)
+    promotion.setdefault("status", "not_ready")
+    wi["promotion"] = promotion
+
+    # Rule 4: Lease fields tied to status
+    if wi.get("status") != "implementing":
+        wi["owner_session_id"] = None
+        wi["last_heartbeat_at"] = None
+        wi["lease_expires_at"] = None
+
+    # Rule 5: Gate field tied to status — clear unconditionally when not blocked.
+    if wi.get("status") != "blocked_on_human_gate":
+        wi["blocked_by_gate"] = None
+
+    # Rule 7: Complexity validation
+    cmplx = wi.get("complexity")
+    if cmplx not in VALID_COMPLEXITY:
+        _err(1, "invalid_complexity", value=cmplx,
+             valid=list(VALID_COMPLEXITY))
+
+    # Status validation
+    if wi.get("status") not in VALID_STATUSES:
+        _err(1, "invalid_status", value=wi.get("status"),
+             valid=list(VALID_STATUSES))
+
+    # Rule 8: depends_on immutability
+    if existing and existing.get("depends_on"):
+        if wi.get("depends_on") != existing.get("depends_on"):
+            _err(1, "depends_on_immutable",
+                 existing=existing.get("depends_on"),
+                 attempted=wi.get("depends_on"))
+
+    # Rule 6: Revision bump
+    wi["revision"] = (existing.get("revision", 0) if existing else 0) + 1
+
+    return wi
+
+
+def cmd_upsert(root, args):
+    # Parse payload — positional arg or stdin
+    raw = args.payload
+    if raw == "-" or raw is None:
+        raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        _err(1, "invalid_json", detail=str(e))
+
+    if not isinstance(payload, dict):
+        _err(1, "payload_must_be_object")
+
+    wi_id = payload.get("id")
+    if not wi_id:
+        _err(1, "missing_id")
+
+    store = read_store(root)
+    items = store.get("items", [])
+    existing = None
+    existing_idx = None
+    for i, it in enumerate(items):
+        if it.get("id") == wi_id:
+            existing = it
+            existing_idx = i
+            break
+
+    is_new = existing is None
+    merged = _merge_wi(existing, payload)
+    merged = _normalize(merged, existing)
+
+    if is_new:
+        items = items + [merged]
+    else:
+        items = list(items)
+        items[existing_idx] = merged
+
+    new_store = {
+        "revision": store.get("revision", 0) + 1,
+        "updated_at": _now_z(),
+        "items": items,
+    }
+
+    tx = {
+        "writes": [{
+            "path": ".agent-atelier/work-items.json",
+            "expected_revision": store.get("revision"),
+            "content": new_store,
+        }],
+    }
+
+    res = subprocess.run(
+        [state_commit_path(), "--root", root],
+        input=json.dumps(tx),
+        capture_output=True, text=True,
+    )
+    try:
+        sc_out = json.loads(res.stdout) if res.stdout else {}
+    except json.JSONDecodeError:
+        _err(4, "state_commit_unparseable_output", stdout=res.stdout, stderr=res.stderr)
+
+    if res.returncode != 0:
+        reason = sc_out.get("reason", "state_commit_failed")
+        if reason == "stale_revision":
+            sys.exit_code = 2
+            print(json.dumps({
+                "accepted": False,
+                "error": "stale_revision",
+                "expected": sc_out.get("expected"),
+                "actual": sc_out.get("actual"),
+            }, indent=2, ensure_ascii=False))
+            sys.exit(2)
+        _err(4 if res.returncode >= 4 else res.returncode, reason, detail=sc_out)
+
+    native_status = WI_STATUS_TO_NATIVE.get(merged.get("status"), "pending")
+    metadata = {"work_item_id": wi_id}
+    if merged.get("complexity"):
+        metadata["complexity"] = merged["complexity"]
+
+    output = {
+        "accepted": True,
+        "committed_revision": new_store["revision"],
+        "changed": True,
+        "is_new": is_new,
+        "artifacts": [".agent-atelier/work-items.json"],
+        "native_task_sync": {
+            "action": "create" if is_new else "update",
+            "subject_prefix": f"{wi_id}:",
+            "subject": f"{wi_id}: {merged.get('title', '')}",
+            "new_status": native_status,
+            "metadata": metadata,
+            "depends_on": merged.get("depends_on", []),
+        },
+    }
+    print(json.dumps(output, indent=2, ensure_ascii=False))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("list", help="list all work items")
+
+    p_show = sub.add_parser("show", help="show one work item")
+    p_show.add_argument("id", help="WI-ID")
+
+    p_upsert = sub.add_parser("upsert", help="create or update a work item")
+    p_upsert.add_argument("payload", nargs="?", default=None,
+                          help="JSON payload (or use stdin if omitted)")
+
+    args = parser.parse_args()
+    root = resolve_root()
+
+    try:
+        if args.cmd == "list":
+            cmd_list(root, args)
+        elif args.cmd == "show":
+            cmd_show(root, args)
+        elif args.cmd == "upsert":
+            cmd_upsert(root, args)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        _err(4, "runtime_error", detail=str(exc))
+
+
+if __name__ == "__main__":
+    main()

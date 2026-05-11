@@ -4,13 +4,13 @@ agent-atelier — Autonomous product development loop — AI agent team that cyc
 
 ## Plugin Structure
 
-- `plugins/agent-atelier/skills/` — 9 skills: init, status, wi, execute, candidate, validate, gate, watchdog, run
-- `plugins/agent-atelier/hooks/` — Lifecycle hooks: UserPromptSubmit, PreToolUse (destructive command blocking), Stop, SubagentStop (dangling obligation check), TaskCompleted (artifact verification), TeammateIdle (auto-assignment), TaskCreated (budget validation)
-- `plugins/agent-atelier/scripts/` — `state-commit` (atomic multi-file writer), `build-vrm-prompt` (VRM evidence input builder)
-- `plugins/agent-atelier/schema/` — `vrm-evidence-input.schema.json`
-- `plugins/agent-atelier/references/` — paths, state-defaults, wi-schema, recovery-protocol, success-metrics-routing
-- `plugins/agent-atelier/references/prompts/` — 10 production role prompts (orchestrator, state-manager, pm, architect, builder, vrm, qa-reviewer, ux-reviewer, ui-designer, aesthetic-ux-reviewer)
-- `.claude/agents/` — 7 subagent definitions (state-manager, pm, architect, builder, vrm, qa-reviewer, ux-reviewer) with model/tools frontmatter referencing role prompts
+- `plugins/agent-atelier/skills/` — 4 skills total: `plan`, `execute`, `status` (user-facing) + `monitors` (internal shim invoked by orchestrator/cron)
+- `plugins/agent-atelier/scripts/` — Mechanical commands invoked by orchestrator and roles: `state-commit`, `init-helpers.sh`, `wi`, `lifecycle`, `gate`, `watchdog`, `candidate`, `validate`, `_plan_hash.py`. All emit JSON; `native_task_sync` hints are emitted only at the documented WI sync points (`scripts/wi upsert`, `scripts/lifecycle claim/requeue/complete`, `scripts/candidate clear --demoted`).
+- `plugins/agent-atelier/hooks/` — Lifecycle hooks (unchanged composition)
+- `plugins/agent-atelier/schema/` — `vrm-evidence-input.schema.json`, `clarifying-question.schema.json`, `plan-conversation-entry.schema.json`
+- `plugins/agent-atelier/references/` — paths, state-defaults, wi-schema, recovery-protocol, success-metrics-routing, monitor-runtime
+- `plugins/agent-atelier/references/prompts/` — orchestrator (lead), output-discipline (shared), ui-designer, aesthetic-ux-reviewer
+- `plugins/agent-atelier/agents/` — 7 subagent definitions (state-manager, pm, architect, builder, vrm, qa-reviewer, ux-reviewer)
 
 ## Orchestration State
 
@@ -37,11 +37,15 @@ Status mapping:
 | implementing, candidate_queued, candidate_validating, reviewing | in_progress |
 | done | completed |
 
-Sync points: `wi upsert` (TaskCreate + dependency wiring), `execute claim/requeue/complete` (TaskUpdate), `candidate clear --demoted` (TaskUpdate). Native tasks use subject prefix matching (`"WI-NNN:"`) for lookup since `TaskList`/`TaskGet` do not return metadata. Metadata is still set on `TaskCreate` for informational purposes. Sync is best-effort; `work-items.json` is always the source of truth.
+Sync points: `scripts/wi upsert` (TaskCreate + dependency wiring), `scripts/lifecycle claim/requeue/complete` (TaskUpdate), `scripts/candidate clear --demoted` (TaskUpdate). Native tasks use subject prefix matching (`"WI-NNN:"`) for lookup since `TaskList`/`TaskGet` do not return metadata. Metadata is still set on `TaskCreate` for informational purposes. Sync is best-effort; `work-items.json` is always the source of truth.
 
 ## Plan Approval
 
 Complex work items spawn Builders with `mode: "plan"` — the Builder starts in read-only plan mode, proposes via `ExitPlanMode`, and the Orchestrator receives a structured `plan_approval_request` with `request_id`. After approval (`plan_approval_response`), the Builder auto-transitions to `bypassPermissions` for implementation. Simple WIs spawn with `mode: "acceptEdits"` (immediate implementation). The Architect sets `complexity` on every WI during BUILD_PLAN. The Orchestrator reviews plans per the Plan Review Protocol in `references/prompts/orchestrator.md`.
+
+## Plan/Execute Workflow
+
+Two user-facing entry points: `/agent-atelier:plan` runs DISCOVER → BUILD_PLAN with mandatory ClarifyingQuestion ping-pong + final approval gate; `/agent-atelier:execute` runs the same plan cycle if no valid `plan_approval` exists, then drives IMPLEMENT → DONE. The mechanical IMPLEMENT-mode gate is enforced by `scripts/state-commit` (mode: IMPLEMENT requires matching `wi_plan_hash` and `spec_hash` in `plan_approval`). Plan cycle conversation log lives at `.agent-atelier/plan-conversations/<cycle-id>.jsonl` (Orchestrator-only writer). See `docs/superpowers/specs/2026-05-08-plan-execute-workflow-design.md` for full design.
 
 ## Skill Format
 

@@ -1,0 +1,529 @@
+#!/usr/bin/env python3
+"""
+lifecycle — Work item execution lifecycle.
+
+Subcommands:
+  claim <WI-ID> --owner <session> [--lease-minutes N]
+                          Transition ready -> implementing, lease the WI.
+  heartbeat <WI-ID> [--lease-minutes N]
+                          Extend the lease via state-commit verb mode.
+  requeue <WI-ID> [--reason <text>] [--owner <session>] [--increment-stale-requeue]
+                          Return WI to ready (or pending), clear lease/promotion.
+  complete <WI-ID> --validation-manifest <path> --evidence-ref <path>...
+                  --verify-check <name>...
+                          Mark WI as done with validation evidence.
+  attempt <json>          Record an implementation attempt as a separate file.
+
+Mutating commands emit `native_task_sync` hint mapping WI status to native
+task status per AGENTS.md.
+
+Exit codes:
+  0 success
+  1 invalid input / validation
+  2 stale revision / precondition failed
+  3 not found
+  4 IO / runtime
+"""
+
+import argparse
+import datetime
+import json
+import os
+import subprocess
+import sys
+
+
+WI_STATUS_TO_NATIVE = {
+    "pending": "pending",
+    "ready": "pending",
+    "blocked_on_human_gate": "pending",
+    "implementing": "in_progress",
+    "candidate_queued": "in_progress",
+    "candidate_validating": "in_progress",
+    "reviewing": "in_progress",
+    "done": "completed",
+}
+
+
+def _now_z():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _err(code, msg, **extra):
+    payload = {"accepted": False, "error": msg}
+    payload.update(extra)
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    sys.exit(code)
+
+
+def resolve_root():
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        return os.path.realpath(out)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return os.path.realpath(os.getcwd())
+
+
+def state_commit_path():
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)), "state-commit")
+
+
+def read_store(root, name):
+    path = os.path.join(root, ".agent-atelier", name)
+    if not os.path.exists(path):
+        _err(4, f"{name} not found — run init-helpers.sh first", path=path)
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def find_wi(items, wi_id):
+    for i, it in enumerate(items):
+        if it.get("id") == wi_id:
+            return i, it
+    return None, None
+
+
+def run_state_commit(root, tx):
+    res = subprocess.run(
+        [state_commit_path(), "--root", root],
+        input=json.dumps(tx),
+        capture_output=True, text=True,
+    )
+    try:
+        sc_out = json.loads(res.stdout) if res.stdout else {}
+    except json.JSONDecodeError:
+        _err(4, "state_commit_unparseable_output", stdout=res.stdout, stderr=res.stderr)
+
+    if res.returncode != 0:
+        reason = sc_out.get("reason", "state_commit_failed")
+        if reason == "stale_revision":
+            print(json.dumps({
+                "accepted": False,
+                "error": "stale_revision",
+                "expected": sc_out.get("expected"),
+                "actual": sc_out.get("actual"),
+            }, indent=2, ensure_ascii=False))
+            sys.exit(2)
+        _err(4 if res.returncode >= 4 else res.returncode, reason, detail=sc_out)
+    return sc_out
+
+
+def emit(root, accepted_revision, artifacts, wi_id, new_wi_status, extra=None):
+    """Print the standard mutation output with a native_task_sync hint."""
+    output = {
+        "accepted": True,
+        "committed_revision": accepted_revision,
+        "changed": True,
+        "artifacts": artifacts,
+        "native_task_sync": {
+            "action": "update",
+            "subject_prefix": f"{wi_id}:",
+            "new_status": WI_STATUS_TO_NATIVE.get(new_wi_status, "pending"),
+            "metadata": {"work_item_id": wi_id, "wi_status": new_wi_status},
+        },
+    }
+    if extra:
+        output.update(extra)
+    print(json.dumps(output, indent=2, ensure_ascii=False))
+
+
+# ── claim ──────────────────────────────────────────────────────────────
+def cmd_claim(root, args):
+    store = read_store(root, "work-items.json")
+    items = store.get("items", [])
+    idx, wi = find_wi(items, args.id)
+    if wi is None:
+        available = [it.get("id") for it in items]
+        _err(3, "work_item_not_found", requested=args.id, available=available)
+
+    if wi.get("status") != "ready":
+        _err(2, "wrong_status", expected="ready", actual=wi.get("status"))
+
+    now = _now_z()
+    lease_minutes = args.lease_minutes
+    expires = (datetime.datetime.now(datetime.timezone.utc)
+               + datetime.timedelta(minutes=lease_minutes))
+    expires_z = expires.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    new_wi = dict(wi)
+    new_wi["status"] = "implementing"
+    new_wi["owner_session_id"] = args.owner
+    new_wi["last_heartbeat_at"] = now
+    new_wi["lease_expires_at"] = expires_z
+    if not new_wi.get("first_claimed_at"):
+        new_wi["first_claimed_at"] = now
+    new_wi["handoff_count"] = wi.get("handoff_count", 0) + 1
+    new_wi["revision"] = wi.get("revision", 0) + 1
+
+    new_items = list(items)
+    new_items[idx] = new_wi
+
+    new_store = {
+        "revision": store.get("revision", 0) + 1,
+        "updated_at": now,
+        "items": new_items,
+    }
+
+    tx = {"writes": [{
+        "path": ".agent-atelier/work-items.json",
+        "expected_revision": store.get("revision"),
+        "content": new_store,
+    }]}
+    run_state_commit(root, tx)
+
+    emit(root, new_store["revision"],
+         [".agent-atelier/work-items.json"],
+         args.id, "implementing",
+         extra={"lease_expires_at": expires_z, "owner_session_id": args.owner})
+
+
+# ── heartbeat (verb mode) ─────────────────────────────────────────────
+def cmd_heartbeat(root, args):
+    store = read_store(root, "work-items.json")
+    items = store.get("items", [])
+    idx, wi = find_wi(items, args.id)
+    if wi is None:
+        _err(3, "work_item_not_found", requested=args.id)
+    if wi.get("status") != "implementing":
+        _err(2, "wrong_status", expected="implementing", actual=wi.get("status"))
+
+    now = _now_z()
+    lease_minutes = args.lease_minutes
+    expires = (datetime.datetime.now(datetime.timezone.utc)
+               + datetime.timedelta(minutes=lease_minutes))
+    expires_z = expires.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    verb_tx = {
+        "verb": "heartbeat",
+        "target": args.id,
+        "based_on_revision": store.get("revision"),
+        "fields": {
+            "last_heartbeat_at": now,
+            "lease_expires_at": expires_z,
+        },
+    }
+
+    res = subprocess.run(
+        [state_commit_path(), "--root", root],
+        input=json.dumps(verb_tx),
+        capture_output=True, text=True,
+    )
+    try:
+        sc_out = json.loads(res.stdout) if res.stdout else {}
+    except json.JSONDecodeError:
+        _err(4, "state_commit_unparseable_output", stdout=res.stdout, stderr=res.stderr)
+
+    if res.returncode != 0:
+        reason = sc_out.get("reason", "state_commit_failed")
+        if reason == "stale_revision":
+            print(json.dumps({"accepted": False, "error": "stale_revision",
+                              "expected": sc_out.get("expected"),
+                              "actual": sc_out.get("actual")},
+                             indent=2, ensure_ascii=False))
+            sys.exit(2)
+        _err(4 if res.returncode >= 4 else res.returncode, reason, detail=sc_out)
+
+    # Heartbeat is data-plane only — no status change, no native_task_sync hint
+    output = {
+        "accepted": True,
+        "committed_revision": (store.get("revision", 0) + 1),
+        "changed": True,
+        "artifacts": [".agent-atelier/work-items.json"],
+        "lease_expires_at": expires_z,
+    }
+    print(json.dumps(output, indent=2, ensure_ascii=False))
+
+
+# ── requeue ────────────────────────────────────────────────────────────
+def cmd_requeue(root, args):
+    store = read_store(root, "work-items.json")
+    items = store.get("items", [])
+    idx, wi = find_wi(items, args.id)
+    if wi is None:
+        _err(3, "work_item_not_found", requested=args.id)
+
+    if wi.get("status") == "done":
+        _err(2, "cannot_requeue_done", actual=wi.get("status"))
+
+    if args.owner and wi.get("owner_session_id") and wi.get("owner_session_id") != args.owner:
+        _err(2, "owner_mismatch",
+             expected=args.owner, actual=wi.get("owner_session_id"))
+
+    now = _now_z()
+    new_wi = dict(wi)
+    was_reviewing = wi.get("status") == "reviewing"
+    new_wi["status"] = "ready"
+    new_wi["owner_session_id"] = None
+    new_wi["last_heartbeat_at"] = None
+    new_wi["lease_expires_at"] = None
+    if was_reviewing:
+        promotion = dict(new_wi.get("promotion") or {})
+        promotion["candidate_branch"] = None
+        promotion["candidate_commit"] = None
+        promotion["status"] = "not_ready"
+        new_wi["promotion"] = promotion
+    if args.increment_stale_requeue:
+        new_wi["stale_requeue_count"] = wi.get("stale_requeue_count", 0) + 1
+    if args.reason:
+        new_wi["last_requeue_reason"] = args.reason
+    new_wi["revision"] = wi.get("revision", 0) + 1
+
+    new_items = list(items)
+    new_items[idx] = new_wi
+    new_store = {
+        "revision": store.get("revision", 0) + 1,
+        "updated_at": now,
+        "items": new_items,
+    }
+
+    tx = {"writes": [{
+        "path": ".agent-atelier/work-items.json",
+        "expected_revision": store.get("revision"),
+        "content": new_store,
+    }]}
+    run_state_commit(root, tx)
+
+    emit(root, new_store["revision"],
+         [".agent-atelier/work-items.json"],
+         args.id, "ready",
+         extra={"reason": args.reason})
+
+
+# ── complete ───────────────────────────────────────────────────────────
+def cmd_complete(root, args):
+    wi_store = read_store(root, "work-items.json")
+    loop_state = read_store(root, "loop-state.json")
+    items = wi_store.get("items", [])
+    idx, wi = find_wi(items, args.id)
+    if wi is None:
+        _err(3, "work_item_not_found", requested=args.id)
+    if wi.get("status") != "reviewing":
+        _err(2, "wrong_status", expected="reviewing", actual=wi.get("status"))
+
+    if not args.evidence_ref:
+        _err(1, "missing_evidence_ref")
+    if not args.verify_check:
+        _err(1, "missing_verify_check")
+
+    # Read manifest
+    manifest_path = os.path.join(root, args.validation_manifest) \
+        if not os.path.isabs(args.validation_manifest) else args.validation_manifest
+    if not os.path.exists(manifest_path):
+        _err(1, "validation_manifest_not_found", path=args.validation_manifest)
+    with open(manifest_path, encoding="utf-8") as fh:
+        manifest = json.load(fh)
+
+    if manifest.get("status") != "passed":
+        _err(2, "manifest_not_passed", status=manifest.get("status"))
+
+    acs = loop_state.get("active_candidate_set")
+    if not acs:
+        _err(2, "no_active_candidate_set")
+    if args.id not in (acs.get("work_item_ids") or []):
+        _err(2, "wi_not_in_active_set", active=acs.get("work_item_ids"))
+    if manifest.get("candidate_set_id") != acs.get("id"):
+        _err(2, "candidate_set_mismatch",
+             manifest=manifest.get("candidate_set_id"), active=acs.get("id"))
+    if manifest.get("candidate_branch") != acs.get("branch"):
+        _err(2, "branch_mismatch")
+    if manifest.get("candidate_commit") != acs.get("commit"):
+        _err(2, "commit_mismatch")
+    if args.id not in (manifest.get("work_item_ids") or []):
+        _err(2, "wi_not_in_manifest")
+
+    # Verify evidence files exist
+    for ref in args.evidence_ref:
+        ref_path = os.path.join(root, ref) if not os.path.isabs(ref) else ref
+        if not os.path.exists(ref_path):
+            _err(1, "evidence_missing", path=ref)
+
+    now = _now_z()
+    completion = {
+        "completed_at": now,
+        "validation_run_id": manifest.get("id"),
+        "validation_manifest": args.validation_manifest,
+        "evidence_refs": list(args.evidence_ref),
+        "verify_checks": list(args.verify_check),
+    }
+
+    new_wi = dict(wi)
+    new_wi["status"] = "done"
+    new_wi["owner_session_id"] = None
+    new_wi["last_heartbeat_at"] = None
+    new_wi["lease_expires_at"] = None
+    new_wi["completion"] = completion
+    new_wi["revision"] = wi.get("revision", 0) + 1
+
+    new_items = list(items)
+    new_items[idx] = new_wi
+
+    new_wi_store = {
+        "revision": wi_store.get("revision", 0) + 1,
+        "updated_at": now,
+        "items": new_items,
+    }
+
+    # Check if all WIs in active set are done after this update
+    all_done = True
+    for wid in (acs.get("work_item_ids") or []):
+        for it in new_items:
+            if it.get("id") == wid:
+                if it.get("status") != "done":
+                    all_done = False
+                break
+
+    writes = [{
+        "path": ".agent-atelier/work-items.json",
+        "expected_revision": wi_store.get("revision"),
+        "content": new_wi_store,
+    }]
+
+    artifacts = [".agent-atelier/work-items.json"]
+
+    if all_done:
+        new_loop = dict(loop_state)
+        new_loop["active_candidate_set"] = None
+        new_loop["revision"] = loop_state.get("revision", 0) + 1
+        new_loop["updated_at"] = now
+        writes.append({
+            "path": ".agent-atelier/loop-state.json",
+            "expected_revision": loop_state.get("revision"),
+            "content": new_loop,
+        })
+        artifacts.append(".agent-atelier/loop-state.json")
+
+    tx = {"writes": writes}
+    run_state_commit(root, tx)
+
+    emit(root, new_wi_store["revision"], artifacts, args.id, "done",
+         extra={"completion": completion, "candidate_set_cleared": all_done})
+
+
+# ── attempt ────────────────────────────────────────────────────────────
+def cmd_attempt(root, args):
+    raw = args.payload
+    if raw == "-" or raw is None:
+        raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        _err(1, "invalid_json", detail=str(e))
+    if not isinstance(payload, dict):
+        _err(1, "payload_must_be_object")
+
+    wi_id = payload.get("work_item_id")
+    if not wi_id:
+        _err(1, "missing_work_item_id")
+
+    store = read_store(root, "work-items.json")
+    items = store.get("items", [])
+    idx, wi = find_wi(items, wi_id)
+    if wi is None:
+        _err(3, "work_item_not_found", requested=wi_id)
+
+    next_attempt = wi.get("attempt_count", 0) + 1
+    attempt_id = f"ATT-{wi_id}-{next_attempt:02d}"
+    payload.setdefault("id", attempt_id)
+    payload.setdefault("attempt", next_attempt)
+    payload.setdefault("recorded_at", _now_z())
+
+    rel_attempt_path = f".agent-atelier/attempts/{attempt_id}.json"
+
+    new_wi = dict(wi)
+    new_wi["attempt_count"] = next_attempt
+    new_wi["last_attempt_ref"] = rel_attempt_path
+    if "fingerprint" in payload:
+        new_wi["last_finding_fingerprint"] = payload["fingerprint"]
+    elif "last_finding_fingerprint" in payload:
+        new_wi["last_finding_fingerprint"] = payload["last_finding_fingerprint"]
+    new_wi["revision"] = wi.get("revision", 0) + 1
+
+    new_items = list(items)
+    new_items[idx] = new_wi
+
+    new_store = {
+        "revision": store.get("revision", 0) + 1,
+        "updated_at": _now_z(),
+        "items": new_items,
+    }
+
+    tx = {
+        "writes": [
+            {
+                "path": rel_attempt_path,
+                "expected_revision": None,
+                "content": payload,
+            },
+            {
+                "path": ".agent-atelier/work-items.json",
+                "expected_revision": store.get("revision"),
+                "content": new_store,
+            },
+        ],
+    }
+    run_state_commit(root, tx)
+
+    output = {
+        "accepted": True,
+        "committed_revision": new_store["revision"],
+        "changed": True,
+        "artifacts": [rel_attempt_path, ".agent-atelier/work-items.json"],
+        "attempt_id": attempt_id,
+    }
+    print(json.dumps(output, indent=2, ensure_ascii=False))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_claim = sub.add_parser("claim")
+    p_claim.add_argument("id")
+    p_claim.add_argument("--owner", required=True, dest="owner")
+    p_claim.add_argument("--lease-minutes", type=int, default=90)
+
+    p_hb = sub.add_parser("heartbeat")
+    p_hb.add_argument("id")
+    p_hb.add_argument("--lease-minutes", type=int, default=90)
+
+    p_rq = sub.add_parser("requeue")
+    p_rq.add_argument("id")
+    p_rq.add_argument("--reason", default=None)
+    p_rq.add_argument("--owner", default=None)
+    p_rq.add_argument("--increment-stale-requeue", action="store_true")
+
+    p_cp = sub.add_parser("complete")
+    p_cp.add_argument("id")
+    p_cp.add_argument("--validation-manifest", required=True)
+    p_cp.add_argument("--evidence-ref", action="append", default=[])
+    p_cp.add_argument("--verify-check", action="append", default=[])
+
+    p_at = sub.add_parser("attempt")
+    p_at.add_argument("payload", nargs="?", default=None)
+
+    args = parser.parse_args()
+    root = resolve_root()
+
+    try:
+        if args.cmd == "claim":
+            cmd_claim(root, args)
+        elif args.cmd == "heartbeat":
+            cmd_heartbeat(root, args)
+        elif args.cmd == "requeue":
+            cmd_requeue(root, args)
+        elif args.cmd == "complete":
+            cmd_complete(root, args)
+        elif args.cmd == "attempt":
+            cmd_attempt(root, args)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        _err(4, "runtime_error", detail=str(exc))
+
+
+if __name__ == "__main__":
+    main()

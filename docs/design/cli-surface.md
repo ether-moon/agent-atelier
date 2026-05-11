@@ -1,8 +1,17 @@
 # Agent-Atelier — CLI Surface
 
-**Date**: 2026-04-08
+**Date**: 2026-04-08 (revised 2026-05-08)
 **Status**: Draft v1
-**Scope**: Required `agent-atelier` command interface for the runtime
+**Scope**: Required runtime command interface
+
+## Surface Overview
+
+The runtime exposes two distinct surfaces:
+
+- **User-facing skills (3):** `/agent-atelier:plan`, `/agent-atelier:execute`, `/agent-atelier:status` — the only commands a user is expected to invoke directly. `monitors` exists as a fourth skill but is internal-by-usage (invoked by the orchestrator/cron, not the user).
+- **Mechanical scripts (`plugins/agent-atelier/scripts/*`):** `state-commit`, `init-helpers.sh`, `wi`, `lifecycle`, `gate`, `watchdog`, `candidate`, `validate`. These implement the verbs documented below; orchestrator and roles invoke them. All emit JSON; mutating scripts include a `native_task_sync` hint for the LLM-side Agent Teams sync.
+
+Sections 4.1–4.9 below describe the verbs, regardless of whether they are implemented as scripts or skills.
 
 ---
 
@@ -51,9 +60,9 @@ Required common flags for mutating commands:
 
 ### 4.1 Bootstrap
 
-#### `agent-atelier init-state`
+#### `scripts/init-helpers.sh` (formerly `agent-atelier init-state`)
 
-Creates the initial orchestration directory and bootstrap files.
+Creates the initial orchestration directory and bootstrap files. Invoked transparently by `/agent-atelier:plan` and `/agent-atelier:execute` when the workspace is missing.
 
 Required outputs:
 
@@ -79,11 +88,11 @@ Returns one work item.
 
 ### 4.3 Work Item Commands
 
-#### `agent-atelier wi upsert`
+#### `scripts/wi upsert`
 
 Creates or replaces a WI definition.
 
-#### `agent-atelier wi claim`
+#### `scripts/lifecycle claim`
 
 Preconditions:
 
@@ -96,7 +105,7 @@ Effects:
 - transitions WI to `implementing`
 - writes `owner_session_id`, `last_heartbeat_at`, `lease_expires_at`
 
-#### `agent-atelier wi heartbeat`
+#### `scripts/lifecycle heartbeat`
 
 Preconditions:
 
@@ -107,7 +116,7 @@ Effects:
 - updates heartbeat timestamp
 - extends lease expiry
 
-#### `agent-atelier wi requeue`
+#### `scripts/lifecycle requeue`
 
 Preconditions:
 
@@ -119,7 +128,7 @@ Effects:
 - moves WI to `ready` or `pending`
 - optionally appends a reason
 
-#### `agent-atelier wi complete`
+#### `scripts/lifecycle complete`
 
 Preconditions:
 
@@ -135,47 +144,47 @@ Effects:
 
 ### 4.4 Attempt Commands
 
-#### `agent-atelier attempt append`
+#### `scripts/lifecycle attempt`
 
 Appends an attempt artifact and updates WI attempt counters.
 
 ### 4.5 Candidate Commands
 
-#### `agent-atelier candidate enqueue`
+#### `scripts/candidate enqueue`
 
 Adds a WI candidate to the queue.
 
-#### `agent-atelier candidate activate`
+#### `scripts/candidate activate`
 
 Moves one queued candidate set into `active_candidate_set`.
 
-#### `agent-atelier candidate clear`
+#### `scripts/candidate clear`
 
 Clears the active candidate set after completion or demotion.
 
 ### 4.6 Validation Commands
 
-#### `agent-atelier validate record`
+#### `scripts/validate record`
 
 Registers a validation run manifest for a candidate set and links it to one or more WIs.
 
 ### 4.7 Human Gate Commands
 
-#### `agent-atelier gate open`
+#### `scripts/gate open`
 
 Creates an HDR and blocks the affected WIs.
 
-#### `agent-atelier gate list`
+#### `scripts/gate list`
 
 Returns all open and resolved gates.
 
-#### `agent-atelier gate resolve`
+#### `scripts/gate resolve`
 
 Resolves an HDR and restores blocked WIs to `ready`.
 
 ### 4.8 Watchdog
 
-#### `agent-atelier watchdog tick`
+#### `scripts/watchdog tick`
 
 Evaluates orchestration state, performs allowed mechanical recovery, and writes alerts.
 
@@ -185,22 +194,22 @@ The command must be safe to run repeatedly.
 
 ### 4.9 Orchestration Runner
 
-#### `agent-atelier run`
+#### `/agent-atelier:execute`
 
-Top-level entry point for the autonomous development loop. Spawns the agent team, drives work items through the full lifecycle (spec → implement → validate → review → done), and manages role activation/shutdown by phase.
+Top-level user-facing entry point for the autonomous development loop. If no valid `plan_approval` exists, the execute skill first runs the `/agent-atelier:plan` cycle (DISCOVER → BUILD_PLAN with ping-pong + approval gate); after a valid plan is recorded, it spawns the agent team, drives work items through IMPLEMENT → VALIDATE → REVIEW → DONE, and manages role activation/shutdown by phase.
 
-This is the highest-level command — it orchestrates all other commands internally. It is not a state-mutating command in the traditional sense; it is a long-running coordinator.
+This is the highest-level command — it orchestrates all the script-level verbs internally. It is not a state-mutating command in the traditional sense; it is a long-running coordinator.
 
-`run` also owns the lifecycle of session-scoped runtime infrastructure:
+`/agent-atelier:execute` also owns the lifecycle of session-scoped runtime infrastructure:
 
-- creates fresh monitors
+- creates fresh monitors (via the internal `monitors` shim)
 - creates the `*/2` monitor poll cron job
 - creates the `*/15` watchdog recovery cron job
 - after crash recovery, runs one startup resume sweep so stranded `implementing` WIs are reclaimed immediately instead of waiting for lease expiry
 
 Required preconditions:
 
-- orchestration initialized (`init-state` completed)
+- orchestration initialized (`scripts/init-helpers.sh` completed; auto-run on first invocation)
 - behavior spec exists at the configured path
 
 ---
@@ -247,14 +256,14 @@ If the command is idempotently replayed, it may return:
 
 The CLI should be implemented in this order:
 
-1. `init-state`
-2. `state show`
-3. `wi upsert`, `wi claim`, `wi heartbeat`, `wi requeue`, `wi complete`
-4. `attempt append`
-5. `candidate enqueue`, `candidate activate`, `candidate clear`
-6. `validate record`
-7. `gate open`, `gate resolve`
-8. `watchdog tick`
-9. `run` (orchestration loop — depends on all of the above)
+1. `scripts/init-helpers.sh`
+2. `scripts/wi list` / `wi show`
+3. `scripts/wi upsert`, `scripts/lifecycle claim|heartbeat|requeue|complete`
+4. `scripts/lifecycle attempt`
+5. `scripts/candidate enqueue|activate|clear`
+6. `scripts/validate record`
+7. `scripts/gate open|resolve`
+8. `scripts/watchdog tick`
+9. `/agent-atelier:plan` and `/agent-atelier:execute` (orchestration loop — depend on all of the above)
 
 This sequence matches the v0 runtime path.
