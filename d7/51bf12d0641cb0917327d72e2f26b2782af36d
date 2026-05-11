@@ -1,0 +1,22 @@
+## Decisions Made
+- Run WAL replay BEFORE the Python emitter and pass `WAL_RECOVERED` as a CLI arg to the heredoc Python block. The alternative of having the bash section emit a final composite JSON after Python would require a second JSON serialization layer; piping the flag through argv is simpler.
+- Drop `--migrate-only` entirely rather than implement it. No caller uses the flag (grep confirms only init-helpers.sh and the implementation plan reference it); adding behavior speculatively would have widened the change.
+
+## Problems Encountered
+- None — both fixes verified with a smoke test (TMP repo init shows `wal_recovered: false` in stdout output).
+
+## Constraints Identified
+- The Python heredoc uses `<<'PYEOF'` (single-quoted) so bash variables are NOT expanded inside it; values must be passed as positional argv arguments to the `python3 -` invocation.
+- WAL replay must run before any further state mutations so the replay sees the canonical pre-recovery state; reordering before the Python merge is safe because the Python block only reads state-defaults.md and writes missing state files.
+
+## Open Questions
+- None.
+
+## Context
+Fifth commit of CodeRabbit PR #15 resolution. Two `scripts/init-helpers.sh` fixes (MAJOR: wal_recovered emission, MINOR: dead flag removal). All 70 tests pass; smoke-tested wal_recovered output.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
