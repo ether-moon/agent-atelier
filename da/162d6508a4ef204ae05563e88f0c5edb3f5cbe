@@ -1,0 +1,24 @@
+## Decisions Made
+- Use the artifact-in-tx pattern from `lifecycle.cmd_attempt` (lines 461-475) as the structural template — same `expected_revision: None` for the new artifact, full revision check for runtime state files.
+- For the `environment_error` path, still emit a state-commit when `not skip_phase1` (just the manifest write). When `skip_phase1` is true (manifest already on disk from a prior call), skip the state-commit entirely and report `changed: false`. This preserves the existing behavior contract.
+- Preserve the manifest dict directly in the `content` field rather than pre-serializing — `state-commit.serialize()` already JSON-encodes dicts at the boundary.
+
+## Problems Encountered
+- The `environment_error` branch originally did `os.makedirs + write + return` with no state-commit. Folding the manifest into the transaction meant introducing a conditional state-commit for that branch. Verified `state-commit` accepts a single-write tx (no constraint requiring multiple writes).
+
+## Constraints Identified
+- `state-commit.resolve_tx_path` accepts any path within `.agent-atelier/` boundary (verified at scripts/state-commit:105-122), so `.agent-atelier/validation/<run_id>/manifest.json` is a valid tx target.
+- The `--manifest-path` (skip_phase1=True) flow points at an already-existing manifest file written by a prior call; the manifest is intentionally NOT re-added to the tx in that case to preserve idempotency.
+- All three status paths (environment_error, passed, failed) construct their own writes list off a shared `writes = []` initialization to avoid cross-path contamination.
+
+## Open Questions
+- None — refactor verified by full test suite (70/70 pass).
+
+## Context
+Seventh commit of CodeRabbit PR #15 resolution. MAJOR (heavy-lift) refactor in `scripts/validate.cmd_record`: manifest write is now atomic with WI status mutations. 39 insertions / 33 deletions; no functional regression.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
