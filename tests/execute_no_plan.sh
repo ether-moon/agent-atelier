@@ -19,6 +19,8 @@ SPEC_EOF
 
 # Sanity: plan_approval is null in initial state
 LS_PATH="$TMP/.agent-atelier/loop-state.json"
+BASE_REV=$(python3 -c "import json; print(json.load(open('$LS_PATH'))['revision'])")
+NEXT_REV=$((BASE_REV + 1))
 PA_INIT=$(python3 -c "import json; print(json.load(open('$LS_PATH'))['plan_approval'])")
 if [ "$PA_INIT" = "None" ]; then
   pass "initial plan_approval is null"
@@ -47,9 +49,9 @@ import json
 tx = {
   'writes': [{
     'path': '.agent-atelier/loop-state.json',
-    'expected_revision': 1,
+    'expected_revision': $BASE_REV,
     'content': {
-      'revision': 2,
+      'revision': $NEXT_REV,
       'updated_at': '2026-05-08T10:00:00Z',
       'mode': 'IMPLEMENT',
       'active_spec': 'docs/product/behavior-spec.md',

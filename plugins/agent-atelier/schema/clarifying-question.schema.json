@@ -9,8 +9,8 @@
     "phase": {"enum": ["DISCOVER", "SPEC_DRAFT", "SPEC_HARDEN", "BUILD_PLAN"]},
     "topic": {"type": "string", "maxLength": 60},
     "question": {"type": "string"},
-    "options": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
-    "recommended": {"type": "string"},
+    "options": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 5},
+    "recommended": {"type": "string", "description": "MUST be one of options[] — enforced by the orchestrator at consumption time; JSON Schema draft-07 cannot express this cross-field invariant."},
     "reasoning": {"type": "string"},
     "blocking": {"type": "boolean"}
   }
