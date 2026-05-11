@@ -1,0 +1,22 @@
+## Decisions Made
+- Reject stale candidate heads with an explicit `wi_not_candidate_queued` error rather than auto-recover — corruption should surface to the orchestrator, not be silently papered over.
+- For mixed-state demote: preserve `done` items in place and narrow the `native_task_sync` target list rather than rejecting the operation outright. CodeRabbit offered both options; preservation is less disruptive for partial-completion recovery flows and matches the existing idempotency pattern.
+
+## Problems Encountered
+- `native_task_sync` initially carried every WI in the active set with one shared `new_status`. After the demote fix, completed WIs needed to be excluded from the sync targets — solved by introducing `sync_wi_ids` (defaults to `wi_ids`, narrowed in the demote branch).
+
+## Constraints Identified
+- `native_task_sync.targets` shares a single `new_status` per call, so heterogeneous status updates (some `done`, some `ready`) require either splitting the call or filtering the target list. The current shape made filtering simpler.
+- Native task status mapping treats `done` as `completed` and `ready` as `pending`; regressing `done -> ready` would emit a `completed -> pending` transition that downstream tooling could interpret as task reopening.
+
+## Open Questions
+- None.
+
+## Context
+Third commit of CodeRabbit PR #15 resolution. Two MAJOR fixes in `scripts/candidate` covering activation pre-validation and demote safety. All 70 tests pass.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
